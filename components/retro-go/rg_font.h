@@ -18,6 +18,9 @@ typedef struct {
 void rg_font_init(void);
 void rg_font_deinit(void);
 bool rg_font_load_from_memory(const uint8_t *buffer, size_t size);
+// Load one .font file. rg_font_init() already sweeps the fonts folder on the card, so this
+// is only needed to add one from somewhere else.
+bool rg_font_load_from_file(const char *path);
 const rg_font_t *rg_font_get(int index);
 int rg_font_get_count(void);
 const char *rg_font_get_name(int index);

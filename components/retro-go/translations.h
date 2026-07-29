@@ -3,17 +3,30 @@
 static const char *language_names[RG_LANG_MAX] = {
     [RG_LANG_EN] = "English",
     [RG_LANG_ZH] = "简体中文",
+    [RG_LANG_KO] = "한국어",
 };
+
+// Korean is filled in as it is written rather than all at once. An entry with no
+// [RG_LANG_KO] is not a hole: rg_gettext returns the original string when a translation is
+// missing, so anything untranslated simply shows in English. That makes it safe to add
+// these a handful at a time.
+//
+// The strings were not machine-derived from the Game & Watch fork. Joining the two projects
+// on their string keys covers only 15% and gets some of that wrong -- its language-name
+// field maps "English" to the name of whatever language you picked, so every "English" in
+// the UI would have become "한국어".
 
 static const char *translations[][RG_LANG_MAX] =
 {
     {
         [RG_LANG_EN] = "Never",
         [RG_LANG_ZH] = "从不",
+        [RG_LANG_KO] = "안 함",
     },
     {
         [RG_LANG_EN] = "Always",
         [RG_LANG_ZH] = "总是",
+        [RG_LANG_KO] = "항상",
     },
     {
         [RG_LANG_EN] = "Composite",
@@ -42,10 +55,12 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Full",
         [RG_LANG_ZH] = "全屏",
+        [RG_LANG_KO] = "가득 채우기",
     },
     {
         [RG_LANG_EN] = "Yes",
         [RG_LANG_ZH] = "是",
+        [RG_LANG_KO] = "예",
     },
     {
         [RG_LANG_EN] = "Select file",
@@ -54,6 +69,7 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Language",
         [RG_LANG_ZH] = "语言",
+        [RG_LANG_KO] = "언어",
     },
     {
         [RG_LANG_EN] = "Language changed!",
@@ -70,6 +86,7 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Options",
         [RG_LANG_ZH] = "选项",
+        [RG_LANG_KO] = "설정",
     },
     {
         [RG_LANG_EN] = "About Retro-Go",
@@ -78,6 +95,7 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Reset all settings?",
         [RG_LANG_ZH] = "重置所有设置?",
+        [RG_LANG_KO] = "모든 설정을 초기화할까요?",
     },
     {
         [RG_LANG_EN] = "Initializing...",
@@ -122,10 +140,12 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "On",
         [RG_LANG_ZH] = "开",
+        [RG_LANG_KO] = "켜기",
     },
     {
         [RG_LANG_EN] = "Keyboard",
         [RG_LANG_ZH] = "键盘",
+        [RG_LANG_KO] = "키보드",
     },
     {
         [RG_LANG_EN] = "Joystick",
@@ -162,6 +182,7 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Emulator options",
         [RG_LANG_ZH] = "模拟器选项",
+        [RG_LANG_KO] = "에뮬레이터 설정",
     },
     {
         [RG_LANG_EN] = "Date",
@@ -284,14 +305,17 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "No",
         [RG_LANG_ZH] = "否",
+        [RG_LANG_KO] = "아니오",
     },
     {
         [RG_LANG_EN] = "OK",
         [RG_LANG_ZH] = "确定",
+        [RG_LANG_KO] = "확인",
     },
     {
         [RG_LANG_EN] = "Off",
         [RG_LANG_ZH] = "关",
+        [RG_LANG_KO] = "끄기",
     },
     {
         [RG_LANG_EN] = "Horiz",
@@ -308,6 +332,7 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Fit",
         [RG_LANG_ZH] = "适应",
+        [RG_LANG_KO] = "비율 맞춤",
     },
     {
         [RG_LANG_EN] = "Zoom",
@@ -386,10 +411,12 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Brightness",
         [RG_LANG_ZH] = "亮度",
+        [RG_LANG_KO] = "밝기",
     },
     {
         [RG_LANG_EN] = "Volume",
         [RG_LANG_ZH] = "音量",
+        [RG_LANG_KO] = "음량",
     },
     {
         [RG_LANG_EN] = "Audio out",
@@ -420,6 +447,7 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Scaling",
         [RG_LANG_ZH] = "缩放",
+        [RG_LANG_KO] = "화면 비율",
     },
     {
         [RG_LANG_EN] = "Factor",
@@ -428,6 +456,7 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Filter",
         [RG_LANG_ZH] = "滤镜",
+        [RG_LANG_KO] = "필터",
     },
     {
         [RG_LANG_EN] = "Border",
@@ -436,6 +465,7 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Speed",
         [RG_LANG_ZH] = "速度",
+        [RG_LANG_KO] = "속도",
     },
 
     // about menu
@@ -482,10 +512,12 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Save & Continue",
         [RG_LANG_ZH] = "保存并继续",
+        [RG_LANG_KO] = "저장 후 계속",
     },
     {
         [RG_LANG_EN] = "Save & Quit",
         [RG_LANG_ZH] = "保存并退出",
+        [RG_LANG_KO] = "저장 후 종료",
     },
     {
         [RG_LANG_EN] = "Load game",
@@ -494,14 +526,17 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Reset",
         [RG_LANG_ZH] = "重置",
+        [RG_LANG_KO] = "초기화",
     },
     {
         [RG_LANG_EN] = "About",
         [RG_LANG_ZH] = "关于",
+        [RG_LANG_KO] = "정보",
     },
     {
         [RG_LANG_EN] = "Quit",
         [RG_LANG_ZH] = "退出",
+        [RG_LANG_KO] = "종료",
     },
     {
         [RG_LANG_EN] = "Soft reset",
@@ -518,10 +553,12 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Save",
         [RG_LANG_ZH] = "保存",
+        [RG_LANG_KO] = "저장",
     },
     {
         [RG_LANG_EN] = "Load",
         [RG_LANG_ZH] = "加载",
+        [RG_LANG_KO] = "불러오기",
     },
     // end of rg_gui.c
 
@@ -643,6 +680,7 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "SD Card Error",
         [RG_LANG_ZH] = "SD卡错误",
+        [RG_LANG_KO] = "SD 카드 오류",
     },
     {
         [RG_LANG_EN] = "Storage mount failed.\nMake sure the card is FAT32.",
@@ -753,6 +791,7 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "App unresponsive... Hold MENU to quit!",
         [RG_LANG_ZH] = "应用无响应... 长按MENU退出!",
+        [RG_LANG_KO] = "앱이 응답하지 않습니다... MENU를 길게 눌러 종료",
     },
     {
         [RG_LANG_EN] = "Reboot to factory ",
@@ -761,14 +800,17 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Reboot to launcher",
         [RG_LANG_ZH] = "重启到启动器",
+        [RG_LANG_KO] = "런처로 재시작",
     },
     {
         [RG_LANG_EN] = "Recovery mode",
         [RG_LANG_ZH] = "恢复模式",
+        [RG_LANG_KO] = "복구 모드",
     },
     {
         [RG_LANG_EN] = "System Panic!",
         [RG_LANG_ZH] = "系统崩溃!",
+        [RG_LANG_KO] = "시스템 오류!",
     },
     {
         [RG_LANG_EN] = "Save failed",
@@ -781,10 +823,12 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Application crashed",
         [RG_LANG_ZH] = "应用程序崩溃",
+        [RG_LANG_KO] = "앱이 비정상 종료되었습니다",
     },
     {
         [RG_LANG_EN] = "Log saved to SD Card.",
         [RG_LANG_ZH] = "日志已保存到SD卡。",
+        [RG_LANG_KO] = "로그를 SD 카드에 저장했습니다.",
     },
     // gui.c
     {
@@ -912,6 +956,7 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Application terminated!",
         [RG_LANG_ZH] = "应用程序已终止!",
+        [RG_LANG_KO] = "앱을 강제 종료했습니다!",
     },
     {
         [RG_LANG_EN] = "Boot will continue but it will surely crash...",
@@ -1019,6 +1064,7 @@ static const char *translations[][RG_LANG_MAX] =
     {
         [RG_LANG_EN] = "Overclock",
         [RG_LANG_ZH] = "超频",
+        [RG_LANG_KO] = "오버클럭",
     },
     {
         [RG_LANG_EN] = "Reboot to firmware",
