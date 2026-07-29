@@ -17,6 +17,22 @@
 extern "C" {
 #endif
 
+// Panel geometry and timing. A target that knows its own panel overrides these from its
+// config.h; the values here are the generic 480x800 ST7701 set the driver shipped with and
+// are a starting point, not a datasheet.
+#ifdef RG_DSI_PANEL_H_RES
+#define ST7701_LCD_H_RES             RG_DSI_PANEL_H_RES
+#define ST7701_LCD_V_RES             RG_DSI_PANEL_V_RES
+#define ST7701_LCD_HBP               RG_DSI_HBP
+#define ST7701_LCD_HSYNC             RG_DSI_HSYNC
+#define ST7701_LCD_HFP               RG_DSI_HFP
+#define ST7701_LCD_VBP               RG_DSI_VBP
+#define ST7701_LCD_VSYNC             RG_DSI_VSYNC
+#define ST7701_LCD_VFP               RG_DSI_VFP
+#define ST7701_LANE_NUM              RG_DSI_LANE_NUM
+#define ST7701_DPI_CLOCK_MHZ         RG_DSI_DPI_CLOCK_MHZ
+#define ST7701_LANE_BIT_RATE         RG_DSI_LANE_BIT_RATE_MBPS
+#else
 #define ST7701_LCD_H_RES             480
 #define ST7701_LCD_V_RES             800
 
@@ -30,6 +46,7 @@ extern "C" {
 #define ST7701_LANE_NUM              2
 #define ST7701_DPI_CLOCK_MHZ         30
 #define ST7701_LANE_BIT_RATE         500
+#endif
 
 #define ST7701_LEDC_TIMER            LEDC_TIMER_0
 #define ST7701_LEDC_MODE             LEDC_LOW_SPEED_MODE
@@ -183,11 +200,19 @@ static void lcd_sync(void)
 
 // NOTE: This buffer is shared and must be used immediately after lcd_get_buffer
 // is called. Do not call lcd_get_buffer again before lcd_send_buffer is called.
-// The buffer size is ST7701_LCD_H_RES * 4 * 2 bytes (typically 320*4*2 = 2560 bytes)
+//
+// It is sized from RG_SCREEN_WIDTH, the width retro-go draws in, which is not the panel's
+// width when the panel is mounted rotated. Sizing it from the panel instead used to
+// overflow it by 1280 pixels on an 800x480 target, silently, because the length argument
+// was ignored.
+#ifndef RG_SCREEN_BUFFER_ROWS
+#define RG_SCREEN_BUFFER_ROWS 4
+#endif
+
 static inline uint16_t *lcd_get_buffer(size_t length)
 {
-    (void)length;
-    static uint16_t temp_buffer[ST7701_LCD_H_RES * 4];
+    static uint16_t temp_buffer[RG_SCREEN_WIDTH * RG_SCREEN_BUFFER_ROWS];
+    RG_ASSERT(length <= RG_COUNT(temp_buffer), "lcd buffer too small");
     return temp_buffer;
 }
 
@@ -196,23 +221,59 @@ static inline void lcd_send_buffer(uint16_t *buffer, size_t length)
     if (!buffer || !st7701_ctx.framebuffer || length == 0) return;
 
     int width = st7701_ctx.window_width;
-    int height = length / width;
+    if (width <= 0) return;
 
-    if (width <= 0 || height <= 0) return;
+    int height = (int)length / width;
+    if (height <= 0) return;
 
-    int dst_y = st7701_ctx.window_top + st7701_ctx.current_y;
+    int y0 = st7701_ctx.window_top + st7701_ctx.current_y;
+    int x0 = st7701_ctx.window_left;
 
-    for (int y = 0; y < height; y++) {
-        int fb_y = dst_y + y;
-        if (fb_y >= ST7701_LCD_V_RES) break;
+#if RG_SCREEN_ROTATE == 90
+    // The panel is physically portrait and is mounted turned a quarter turn. An ST7701
+    // cannot transpose for us -- its source drivers run along one edge, so the registers
+    // offer mirroring but not a swapped scan order -- so a logical row becomes a panel
+    // column right here.
+    //
+    // Logical (lx, ly) maps to panel (H_RES - 1 - ly, lx). Flip to (ly, V_RES - 1 - lx) if
+    // the picture comes out upside down once the panel is actually in the shell.
+    //
+    // The loop runs x outermost on purpose. Doing it the natural way -- a source row at a
+    // time -- means every single store lands in a different cache line, because successive
+    // source pixels are a whole panel row apart. Walking a panel column instead writes
+    // RG_SCREEN_BUFFER_ROWS pixels back to back, so one cache line covers the batch. With
+    // the default four rows that is 8 bytes of a 64 byte line; the target raises the batch
+    // to make the ratio worth having.
+    int rows = height, cols = width;
+    if (y0 < 0 || x0 < 0) return;
+    if (y0 + rows > ST7701_LCD_H_RES) rows = ST7701_LCD_H_RES - y0;
+    if (x0 + cols > ST7701_LCD_V_RES) cols = ST7701_LCD_V_RES - x0;
 
-        uint16_t *src = buffer + (y * width);
-        uint16_t *dst = st7701_ctx.framebuffer + (fb_y * ST7701_LCD_H_RES) + st7701_ctx.window_left;
-
-        for (int x = 0; x < width; x++) {
-            dst[x] = (src[x] >> 8) | (src[x] << 8);
+    for (int x = 0; x < cols; x++) {
+        // Descending: ly grows, and panel x is H_RES - 1 - ly, so the run walks backwards.
+        uint16_t *dst = st7701_ctx.framebuffer
+                      + (size_t)(x0 + x) * ST7701_LCD_H_RES
+                      + (ST7701_LCD_H_RES - 1 - y0);
+        const uint16_t *src = buffer + x;
+        for (int y = 0; y < rows; y++) {
+            uint16_t px = src[(size_t)y * width];
+            dst[-y] = (uint16_t)((px >> 8) | (px << 8));
         }
     }
+#else
+    for (int y = 0; y < height; y++) {
+        int ly = y0 + y;
+        if (ly < 0 || ly >= ST7701_LCD_V_RES) continue;
+        const uint16_t *src = buffer + ((size_t)y * width);
+        uint16_t *dst = st7701_ctx.framebuffer + ((size_t)ly * ST7701_LCD_H_RES) + x0;
+        int count = width;
+        if (x0 + count > ST7701_LCD_H_RES)
+            count = ST7701_LCD_H_RES - x0;
+        for (int x = 0; x < count; x++) {
+            dst[x] = (uint16_t)((src[x] >> 8) | (src[x] << 8));
+        }
+    }
+#endif
 
     st7701_ctx.current_y += height;
 }

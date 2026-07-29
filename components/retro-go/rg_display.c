@@ -4,7 +4,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define LCD_BUFFER_LENGTH (RG_SCREEN_WIDTH * 4) // In pixels
+// How many screen rows the driver is handed at a time. Four is plenty when the driver can
+// memcpy a row straight into the panel, but a driver that has to turn rows into columns
+// pays a cache line per column per batch, so a deeper batch divides that cost. A target
+// with such a panel raises this; see RG_SCREEN_BUFFER_ROWS in its config.h.
+#ifndef RG_SCREEN_BUFFER_ROWS
+#define RG_SCREEN_BUFFER_ROWS 4
+#endif
+
+#define LCD_BUFFER_LENGTH (RG_SCREEN_WIDTH * RG_SCREEN_BUFFER_ROWS) // In pixels
 
 // static rg_display_driver_t driver;
 static rg_task_t *display_task_queue;
