@@ -187,7 +187,7 @@
 // its I2C register init sequence before it will make a sound, so it stays off until then.
 // ---------------------------------------------------------------------------
 #define RG_AUDIO_USE_INT_DAC        0
-#define RG_AUDIO_USE_EXT_DAC        0   // TODO: enable once ES8311 init lands
+#define RG_AUDIO_USE_EXT_DAC        1
 #define RG_I2C_ES8311_ADDR          0x18
 #define RG_GPIO_SND_I2S_MCK         GPIO_NUM_13
 #define RG_GPIO_SND_I2S_BCK         GPIO_NUM_12

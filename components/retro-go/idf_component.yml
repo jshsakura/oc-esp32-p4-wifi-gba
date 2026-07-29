@@ -1,0 +1,6 @@
+dependencies:
+  idf: ">=5.0"
+  # ES8311 codec support. The codec needs a clock-coefficient table keyed on the
+  # MCLK/sample-rate pair, which is exactly the sort of thing not to hand-write, so use
+  # Espressif's maintained driver rather than a private register sequence.
+  espressif/esp_codec_dev: "^1.3.4"

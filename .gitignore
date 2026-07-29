@@ -23,3 +23,7 @@ build/
 /stdout.txt
 /gmon.out
 /*.exe
+
+# esp-idf component manager
+managed_components/
+dependencies.lock

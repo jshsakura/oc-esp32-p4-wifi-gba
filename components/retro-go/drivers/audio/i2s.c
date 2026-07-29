@@ -1,5 +1,6 @@
 #include "rg_system.h"
 #include "rg_audio.h"
+#include "es8311_codec.h"
 
 #if RG_AUDIO_USE_INT_DAC || RG_AUDIO_USE_EXT_DAC
 
@@ -70,7 +71,13 @@ static bool driver_init(int device, int sample_rate)
             .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate),
             .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
             .gpio_cfg = {
+                // A plain I2S amplifier needs no master clock, but a codec derives its
+                // internal clocks from one and stays silent without it.
+            #ifdef RG_GPIO_SND_I2S_MCK
+                .mclk = RG_GPIO_SND_I2S_MCK,
+            #else
                 .mclk = I2S_GPIO_UNUSED,
+            #endif
                 .bclk = RG_GPIO_SND_I2S_BCK,
                 .ws = RG_GPIO_SND_I2S_WS,
                 .dout = RG_GPIO_SND_I2S_DATA,
@@ -82,6 +89,11 @@ static bool driver_init(int device, int sample_rate)
                 },
             },
         };
+    #ifdef RG_GPIO_SND_I2S_MCK
+        // Must agree with the divider the codec is configured with, or everything plays at
+        // the wrong pitch.
+        std_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256;
+    #endif
         ret = i2s_channel_init_std_mode(state.tx_handle, &std_cfg);
         if (ret != ESP_OK)
             state.last_error = esp_err_to_name(ret);
@@ -92,6 +104,11 @@ static bool driver_init(int device, int sample_rate)
 
     if (ret == ESP_OK)
         ret = i2s_channel_enable(state.tx_handle);
+
+    // The codec has to be told the format before it will unmute. Do it after the channel is
+    // running so MCLK is already ticking when the codec reads its clock registers.
+    if (ret == ESP_OK && state.device == 1 && !rg_es8311_init(state.tx_handle, sample_rate))
+        state.last_error = rg_es8311_get_error();
 
     return state.last_error == NULL;
 }
@@ -104,6 +121,7 @@ static bool driver_set_sample_rates(int sampleRate)
 
 static bool driver_deinit(void)
 {
+    rg_es8311_deinit();
     if (state.tx_handle) {
         i2s_channel_disable(state.tx_handle);
         i2s_del_channel(state.tx_handle);
@@ -191,7 +209,12 @@ static bool driver_submit(const rg_audio_frame_t *frames, size_t count)
 static bool driver_set_mute(bool mute)
 {
     i2s_channel_disable(state.tx_handle);
-    #if defined(RG_GPIO_SND_AMP_ENABLE)
+    #if defined(RG_I2C_ES8311_ADDR)
+        // The codec owns the amplifier enable pin -- it was handed to esp_codec_dev as
+        // pa_pin. Driving the same GPIO from here as well would have the two of them
+        // fighting over it.
+        rg_es8311_set_mute(mute);
+    #elif defined(RG_GPIO_SND_AMP_ENABLE)
         gpio_set_direction(RG_GPIO_SND_AMP_ENABLE, GPIO_MODE_OUTPUT);
         #ifdef RG_GPIO_SND_AMP_ENABLE_INVERT
             gpio_set_level(RG_GPIO_SND_AMP_ENABLE, mute ? 1 : 0);

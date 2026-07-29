@@ -21,6 +21,15 @@ static i2c_master_bus_handle_t i2c_bus_handle = NULL;
     }
 
 
+void *rg_i2c_get_bus_handle(void)
+{
+#if USE_I2C_DRIVER
+    return i2c_initialized ? (void *)i2c_bus_handle : NULL;
+#else
+    return NULL;
+#endif
+}
+
 bool rg_i2c_init(void)
 {
 #if USE_I2C_DRIVER

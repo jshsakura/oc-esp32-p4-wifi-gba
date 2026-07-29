@@ -6,6 +6,13 @@
 
 bool rg_i2c_init(void);
 bool rg_i2c_deinit(void);
+
+// The underlying esp-idf i2c_master_bus_handle_t, or NULL before rg_i2c_init(). Exposed so a
+// device driver that wants the bus for itself -- the ES8311 codec goes through Espressif's
+// esp_codec_dev, which takes a bus handle -- can share this one instead of opening a second
+// master on the same port, which esp-idf refuses outright. Returned as void* so callers that
+// do not care about I2C do not have to pull in the driver headers.
+void *rg_i2c_get_bus_handle(void);
 bool rg_i2c_read(uint8_t addr, int reg, void *read_data, size_t read_len);
 bool rg_i2c_write(uint8_t addr, int reg, const void *write_data, size_t write_len);
 int rg_i2c_read_byte(uint8_t addr, uint8_t reg);
