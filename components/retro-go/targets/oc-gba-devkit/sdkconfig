@@ -37,7 +37,9 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASH_SAMPLE_MODE_STR=y
 CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
 CONFIG_ESPTOOLPY_FLASHFREQ="120m"
-CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+# The module carries 32MB. Declaring 16 made the bootloader clamp to the header value and
+# leave half the chip unreachable.
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
 CONFIG_ESPTOOLPY_BEFORE_RESET=y
 CONFIG_ESPTOOLPY_AFTER_RESET=y
 CONFIG_ESPTOOLPY_MONITOR_BAUD=115200
@@ -176,6 +178,14 @@ CONFIG_ESP_IPC_ISR_ENABLE=y
 #
 # SPI Driver - For display and SD card
 #
+#
+# I2S
+#
+# Without this the driver allocates its channel object with MALLOC_CAP_DEFAULT, which on a
+# board with PSRAM lands outside internal RAM -- and GDMA refuses to register a callback
+# whose user context it cannot reach from an ISR, so audio never initialises at all.
+CONFIG_I2S_ISR_IRAM_SAFE=y
+
 CONFIG_SPI_MASTER_ISR_IN_IRAM=y
 CONFIG_SPI_SLAVE_ISR_IN_IRAM=y
 CONFIG_SPI_MASTER_IN_IRAM=y

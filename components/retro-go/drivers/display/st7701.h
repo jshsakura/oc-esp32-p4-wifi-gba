@@ -278,6 +278,33 @@ static inline void lcd_send_buffer(uint16_t *buffer, size_t length)
     st7701_ctx.current_y += height;
 }
 
+
+// How long to wait for the panel to accept its init sequence before giving up on it.
+// Generous: the sequence itself asks for about 300ms of delays.
+#define ST7701_INIT_TIMEOUT_MS 3000
+
+static SemaphoreHandle_t st7701_init_done = NULL;
+
+static void st7701_panel_init_task(void *arg)
+{
+    (void)arg;
+    int num_cmds = sizeof(st7701_init_sequence) / sizeof(st7701_cmd_t);
+    for (int i = 0; i < num_cmds; i++) {
+        const st7701_cmd_t *cmd = &st7701_init_sequence[i];
+        // This is the call that blocks forever with no panel attached.
+        esp_err_t err = esp_lcd_panel_io_tx_param(st7701_ctx.io, cmd->cmd, cmd->data, cmd->data_len);
+        if (err != ESP_OK) {
+            RG_LOGE("Failed to send command 0x%02x", cmd->cmd);
+        }
+        if (cmd->delay > 0) {
+            vTaskDelay(pdMS_TO_TICKS(cmd->delay));
+        }
+    }
+    vTaskDelay(pdMS_TO_TICKS(200));
+    xSemaphoreGive(st7701_init_done);
+    vTaskDelete(NULL);
+}
+
 static void lcd_init(void)
 {
     esp_err_t ret;
@@ -313,6 +340,7 @@ static void lcd_init(void)
         .lane_bit_rate_mbps = ST7701_LANE_BIT_RATE,
     };
 
+    RG_LOGI("creating DSI bus...");
     ret = esp_lcd_new_dsi_bus(&bus_config, &st7701_ctx.dsi_bus);
     if (ret != ESP_OK) {
         RG_PANIC("Failed to create DSI bus");
@@ -324,24 +352,42 @@ static void lcd_init(void)
         .lcd_param_bits = 8,
     };
 
+    RG_LOGI("DSI bus ok, creating DBI io...");
     ret = esp_lcd_new_panel_io_dbi(st7701_ctx.dsi_bus, &dbi_config, &st7701_ctx.io);
     if (ret != ESP_OK) {
         RG_PANIC("Failed to create DBI interface");
     }
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    int num_cmds = sizeof(st7701_init_sequence) / sizeof(st7701_cmd_t);
-    for (int i = 0; i < num_cmds; i++) {
-        const st7701_cmd_t *cmd = &st7701_init_sequence[i];
-        ret = esp_lcd_panel_io_tx_param(st7701_ctx.io, cmd->cmd, cmd->data, cmd->data_len);
-        if (ret != ESP_OK) {
-            RG_LOGE("Failed to send command 0x%02x", cmd->cmd);
-        }
-        if (cmd->delay > 0) {
-            vTaskDelay(pdMS_TO_TICKS(cmd->delay));
-        }
+    // Send the panel's init sequence, but do not stake the whole device on it.
+    //
+    // esp_lcd_panel_io_tx_param() over DSI never returns when nothing is on the other end of
+    // the ribbon: the PHY waits for a link state that a missing panel will never produce.
+    // Left inline that turns an unplugged or half-seated FPC into a device that boots to
+    // nothing and cannot even reach the recovery screen, since the recovery screen needs the
+    // display it is trying to recover.
+    //
+    // So it runs on its own task and we wait with a deadline. Past the deadline we carry on
+    // without a panel: lcd_send_buffer() already treats a NULL framebuffer as "nowhere to
+    // draw", so input, audio, storage and the serial log all keep working and the problem is
+    // legible instead of silent. The stuck task is abandoned rather than killed -- it is
+    // blocked inside the driver and deleting it there would leave the DSI lock held.
+    RG_LOGI("DBI io ok, sending panel init sequence...");
+    st7701_init_done = xSemaphoreCreateBinary();
+    if (!st7701_init_done)
+        RG_PANIC("Failed to create panel init semaphore");
+
+    if (xTaskCreate(st7701_panel_init_task, "st7701_init", 4096, NULL, 5, NULL) != pdPASS)
+        RG_PANIC("Failed to start panel init task");
+
+    if (xSemaphoreTake(st7701_init_done, pdMS_TO_TICKS(ST7701_INIT_TIMEOUT_MS)) != pdTRUE) {
+        RG_LOGE("Panel did not answer in %d ms -- is the DSI ribbon connected?",
+                ST7701_INIT_TIMEOUT_MS);
+        RG_LOGE("Continuing without a display. Everything else still runs.");
+        st7701_ctx.framebuffer = NULL;
+        st7701_ctx.initialized = false;
+        return;
     }
-    vTaskDelay(pdMS_TO_TICKS(200));
 
     esp_lcd_dpi_panel_config_t dpi_config = {
         .virtual_channel = 0,
@@ -362,11 +408,13 @@ static void lcd_init(void)
         .flags.use_dma2d = 1,
     };
 
+    RG_LOGI("init sequence sent, creating DPI panel...");
     ret = esp_lcd_new_panel_dpi(st7701_ctx.dsi_bus, &dpi_config, &st7701_ctx.panel);
     if (ret != ESP_OK) {
         RG_PANIC("Failed to create DPI panel");
     }
 
+    RG_LOGI("DPI panel created, initialising...");
     ret = esp_lcd_panel_init(st7701_ctx.panel);
     if (ret != ESP_OK) {
         RG_PANIC("Failed to initialize DPI panel");

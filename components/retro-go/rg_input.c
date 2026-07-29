@@ -159,28 +159,54 @@ bool rg_input_read_gamepad_raw(uint32_t *out)
     // their wiring short). Read each distinct device once per poll rather than once per
     // key: at ~13 keys a naive loop would put a dozen transactions on the bus every frame,
     // on a bus the audio codec also lives on.
-    struct { int addr, reg; uint32_t bits; bool ok; } devs[RG_COUNT(keymap_i2c)];
-    size_t ndevs = 0;
+    // A chip that is not there NACKs every time. Polling one at the input rate floods the
+    // log and wastes the bus on a device shared with the audio codec, so a device that has
+    // failed repeatedly is dropped and only retried occasionally -- often enough that a
+    // loose connector recovers on its own, rarely enough to be quiet about it.
+    #define I2C_GAMEPAD_MAX_FAILS 5
+    #define I2C_GAMEPAD_RETRY_US (2 * 1000000)
 
-    for (size_t i = 0; i < RG_COUNT(keymap_i2c); ++i)
+    static struct { int addr, reg; uint32_t bits; bool ok; int fails; int64_t retry_at; }
+        devs[RG_COUNT(keymap_i2c)];
+    static size_t ndevs = 0;
+
+    if (ndevs == 0)
     {
-        int addr = keymap_i2c[i].addr ? keymap_i2c[i].addr : RG_I2C_GPIO_ADDR;
-        int reg = keymap_i2c[i].addr ? keymap_i2c[i].reg : -1;
-        size_t d = 0;
-        while (d < ndevs && !(devs[d].addr == addr && devs[d].reg == reg))
-            ++d;
-        if (d == ndevs)
+        for (size_t i = 0; i < RG_COUNT(keymap_i2c); ++i)
         {
-            uint8_t data[5] = {0};
-            // A device selected by register (an 8-bit expander) answers with one byte.
-            // The legacy path reads five and takes bytes 1 and 2 as a 16-bit word.
-            size_t len = keymap_i2c[i].addr ? 1 : 5;
-            devs[ndevs].addr = addr;
-            devs[ndevs].reg = reg;
-            devs[ndevs].ok = rg_i2c_read(addr, reg, &data, len);
-            devs[ndevs].bits = (len == 1) ? data[0] : (uint32_t)((data[2] << 8) | data[1]);
-            ndevs++;
+            int addr = keymap_i2c[i].addr ? keymap_i2c[i].addr : RG_I2C_GPIO_ADDR;
+            int reg = keymap_i2c[i].addr ? keymap_i2c[i].reg : -1;
+            size_t d = 0;
+            while (d < ndevs && !(devs[d].addr == addr && devs[d].reg == reg))
+                ++d;
+            if (d == ndevs)
+                devs[ndevs++] = (typeof(devs[0])){.addr = addr, .reg = reg};
         }
+    }
+
+    int64_t now = rg_system_timer();
+    for (size_t d = 0; d < ndevs; ++d)
+    {
+        if (devs[d].fails >= I2C_GAMEPAD_MAX_FAILS && now < devs[d].retry_at)
+        {
+            devs[d].ok = false;
+            continue;
+        }
+
+        uint8_t data[5] = {0};
+        // A device selected by register (an 8-bit expander) answers with one byte. The
+        // legacy path reads five and takes bytes 1 and 2 as a 16-bit word.
+        size_t len = (devs[d].reg >= 0) ? 1 : 5;
+        devs[d].ok = rg_i2c_read(devs[d].addr, devs[d].reg, &data, len);
+        devs[d].bits = (len == 1) ? data[0] : (uint32_t)((data[2] << 8) | data[1]);
+
+        if (devs[d].ok)
+            devs[d].fails = 0;
+        else if (++devs[d].fails == I2C_GAMEPAD_MAX_FAILS)
+            RG_LOGW("I2C gamepad at 0x%02X not responding, backing off", devs[d].addr);
+
+        if (devs[d].fails >= I2C_GAMEPAD_MAX_FAILS)
+            devs[d].retry_at = now + I2C_GAMEPAD_RETRY_US;
     }
 
     for (size_t i = 0; i < RG_COUNT(keymap_i2c); ++i)
