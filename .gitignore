@@ -27,3 +27,6 @@ build/
 # esp-idf component manager
 managed_components/
 dependencies.lock
+
+sdkconfig.rgtarget
+/*/sdkconfig.rgtarget

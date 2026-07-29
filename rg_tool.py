@@ -15,7 +15,7 @@ DEFAULT_TARGET = os.getenv("RG_TOOL_TARGET", "esp32p4")
 DEFAULT_BAUD = os.getenv("RG_TOOL_BAUD", "1152000")
 DEFAULT_PORT = os.getenv("RG_TOOL_PORT", "COM3")
 # DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core")
-DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core gbsp")
+DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core gbsp gwenesis fmsx prboom-go")
 DEFAULT_NO_NETWORKING = os.getenv("RG_TOOL_NO_NETWORKING", "0") == "1"
 PROJECT_NAME = os.getenv("PROJECT_NAME", "retro-go")
 PROJECT_VER = os.getenv("PROJECT_VER", "2.0")
@@ -24,9 +24,9 @@ PROJECT_APPS = {
   # Project name  Type, SubType, Size (must be 64KB aligned)
   'launcher':     [0, 0, 983040],
   'retro-core':   [0, 0, 983040],
-  # 'prboom-go':    [0, 0, 851968],  # 暂时禁用
-  # 'gwenesis':     [0, 0, 983040],  # 暂时禁用
-  # 'fmsx':         [0, 0, 589824],  # 暂时禁用
+  'prboom-go':    [0, 0, 851968],
+  'gwenesis':     [0, 0, 983040],
+  'fmsx':         [0, 0, 589824],
   'gbsp':         [0, 0, 851968],
 }
 # PROJECT_APPS = {}
@@ -155,6 +155,15 @@ def clean_app(app):
     print("Done.\n")
 
 
+def _stamp_target(app, target):
+    """Remember which retro-go target this app's sdkconfig was generated for."""
+    try:
+        with open(os.path.join(os.getcwd(), app, "sdkconfig.rgtarget"), "w") as f:
+            f.write(target)
+    except OSError:
+        pass
+
+
 def build_app(app, device_type, with_profiling=False, no_networking=False, is_release=False):
     # To do: clean up if any of the flags changed since last build
     print("Building app '%s'" % app)
@@ -169,6 +178,7 @@ def build_app(app, device_type, with_profiling=False, no_networking=False, is_re
         f.write("# This table isn't used, it's just needed to avoid esp-idf build failures.\n")
         f.write("dummy, app, ota_0, 65536, 3145728\n")
     run(args, cwd=os.path.join(os.getcwd(), app))
+    _stamp_target(app, device_type)
     print("Done.\n")
 
 
@@ -260,10 +270,23 @@ for app in apps:
     app_dir = os.path.join(os.getcwd(), app)
     sdkconfig_file = os.path.join(app_dir, "sdkconfig")
     if os.path.exists(sdkconfig_file):
-        # Check if sdkconfig is for the correct target
+        # Is this sdkconfig the one this target would generate?
+        #
+        # Comparing CONFIG_IDF_TARGET alone is not enough: several boards share a chip, and
+        # a leftover sdkconfig from a sibling target passes that test while carrying the
+        # wrong options entirely. That is not theoretical -- it silently produced a build
+        # with I2S left out of internal RAM, so audio failed to initialise on a board that
+        # had been working minutes earlier. Stamp the retro-go target name in as well.
+        # The retro-go target that produced it, recorded beside it because a generated
+        # sdkconfig has nowhere to keep the fact itself.
+        stamp_file = sdkconfig_file + ".rgtarget"
+        stamped = ""
+        if os.path.exists(stamp_file):
+            with open(stamp_file, "r") as f:
+                stamped = f.read().strip()
         with open(sdkconfig_file, "r") as f:
             content = f.read()
-            if f"CONFIG_IDF_TARGET=\"{IDF_TARGET}\"" not in content:
+            if f"CONFIG_IDF_TARGET=\"{IDF_TARGET}\"" not in content or stamped != args.target:
                 print(f"Removing old sdkconfig for app '{app}' to force target reset...")
                 os.remove(sdkconfig_file)
                 # Also remove build directory
