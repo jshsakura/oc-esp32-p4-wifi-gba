@@ -202,7 +202,10 @@ CONFIG_SPIRAM_BOOT_HW_INIT=y
 CONFIG_SPIRAM_BOOT_INIT=y
 CONFIG_SPIRAM_PRE_CONFIGURE_MEMORY_PROTECTION=y
 CONFIG_SPIRAM_USE_MALLOC=y
-CONFIG_SPIRAM_MEMTEST=y
+# Off: this walks all 32MB on every boot and costs 3.8 seconds, measured. It is a bring-up
+# diagnostic, and every game switch here is a reboot into another app partition, so that
+# time is paid each time you change games.
+CONFIG_SPIRAM_MEMTEST=n
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 
