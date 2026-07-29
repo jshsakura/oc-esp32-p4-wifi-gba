@@ -20,6 +20,10 @@
 #include <esp_sleep.h>
 #include <esp_task_wdt.h>
 #include <driver/gpio.h>
+#if CONFIG_IDF_TARGET_ESP32P4
+#include "soc/hp_sys_clkrst_reg.h"
+#include "esp_cpu.h"
+#endif
 #include <esp_log.h>
 
 #define RG_STRUCT_MAGIC 0x12345678
@@ -1161,6 +1165,88 @@ void rg_system_set_overclock(int level)
     app.frameskip = 1;
 
     RG_LOGW("Overclock level %d applied: %dMhz (measured: %dMhz)", level, calc_mhz, real_mhz);
+#elif CONFIG_IDF_TARGET_ESP32P4
+    // Ported from DynaMight1124/retro-go's p4-overclock branch. Like the ESP32 path above
+    // this pokes the CPU PLL through registers Espressif does not document, in 20MHz steps
+    // around the stock 360MHz.
+    //
+    // Deliberately not persisted: an overclock that survives a reboot is an overclock that
+    // can leave the device unbootable, and this one has no way of knowing it went too far.
+    // It resets to stock every power-on, which makes a bad setting cost one reboot.
+    #define OC_MAX_LEVEL  6
+    #define OC_MIN_LEVEL -6
+
+    if (level < OC_MIN_LEVEL || level > OC_MAX_LEVEL)
+    {
+        RG_LOGW("Invalid level %d, min:%d max:%d", level, OC_MIN_LEVEL, OC_MAX_LEVEL);
+        return;
+    }
+
+    extern uint8_t regi2c_ctrl_read_reg(uint8_t block, uint8_t host_id, uint8_t reg_add);
+    extern void regi2c_ctrl_write_reg(uint8_t block, uint8_t host_id, uint8_t reg_add, uint8_t data);
+    extern unsigned efuse_hal_chip_revision(void);
+    extern uint64_t esp_rtc_get_time_us(void);
+
+    // Remember the divider the bootloader left, so level 0 restores exactly that rather
+    // than a value we computed and hoped was the same.
+    static int original_div7_0 = -1;
+    if (original_div7_0 == -1)
+        original_div7_0 = regi2c_ctrl_read_reg(0x67, 0, 3); // I2C_CPLL, host 0, DIV7_0
+
+    int target_freq = 360 + level * 20;
+    int pll_freq = target_freq;
+    int div_int = 1, div_num = 0, div_den = 1;
+
+    // The PLL only lands on multiples of 40MHz, so an odd step is reached by running the
+    // PLL one step higher and dividing back down fractionally.
+    if (target_freq % 40 != 0)
+    {
+        pll_freq = target_freq + 20;
+        div_num = 1;
+        div_den = target_freq / 20;
+    }
+
+    uint8_t div7_0;
+    if (level == 0)
+        div7_0 = original_div7_0;
+    else if (efuse_hal_chip_revision() < 1)
+        div7_0 = (pll_freq / 40) - 4;
+    else
+        div7_0 = pll_freq / 40;
+
+    regi2c_ctrl_write_reg(0x67, 0, 3, div7_0);
+    rg_task_delay(20);
+
+    uint32_t val = REG_READ(HP_SYS_CLKRST_ROOT_CLK_CTRL0_REG);
+    val &= ~HP_SYS_CLKRST_REG_CPU_CLK_DIV_NUM_M;
+    val |= ((div_int - 1) << HP_SYS_CLKRST_REG_CPU_CLK_DIV_NUM_S) & HP_SYS_CLKRST_REG_CPU_CLK_DIV_NUM_M;
+    val &= ~HP_SYS_CLKRST_REG_CPU_CLK_DIV_NUMERATOR_M;
+    val |= (div_num << HP_SYS_CLKRST_REG_CPU_CLK_DIV_NUMERATOR_S) & HP_SYS_CLKRST_REG_CPU_CLK_DIV_NUMERATOR_M;
+    val &= ~HP_SYS_CLKRST_REG_CPU_CLK_DIV_DENOMINATOR_M;
+    val |= (div_den << HP_SYS_CLKRST_REG_CPU_CLK_DIV_DENOMINATOR_S) & HP_SYS_CLKRST_REG_CPU_CLK_DIV_DENOMINATOR_M;
+    REG_WRITE(HP_SYS_CLKRST_ROOT_CLK_CTRL0_REG, val);
+
+    REG_SET_BIT(HP_SYS_CLKRST_ROOT_CLK_CTRL0_REG, HP_SYS_CLKRST_REG_SOC_CLK_DIV_UPDATE);
+    while (REG_GET_BIT(HP_SYS_CLKRST_ROOT_CLK_CTRL0_REG, HP_SYS_CLKRST_REG_SOC_CLK_DIV_UPDATE))
+        ;
+
+    // The RTC clock is not derived from the CPU clock we just moved, so it stays a usable
+    // reference for measuring what we actually got.
+    uint64_t t = esp_rtc_get_time_us();
+    uint32_t cc = esp_cpu_get_cycle_count();
+    rg_usleep(100000);
+    int real_mhz = (double)(esp_cpu_get_cycle_count() - cc) / (esp_rtc_get_time_us() - t);
+
+    // Audio is unaffected here: the codec runs off its own MCLK, not the CPU clock.
+    static int original_tickRate = 0;
+    if (!original_tickRate)
+        original_tickRate = app.tickRate;
+    app.tickRate = original_tickRate * (360.f / real_mhz);
+
+    app.overclock = level;
+    app.frameskip = 1;
+
+    RG_LOGW("Overclock level %d applied: %dMhz (measured: %dMhz)", level, target_freq, real_mhz);
 #else
     RG_LOGE("Overclock not supported on this platform!");
 #endif

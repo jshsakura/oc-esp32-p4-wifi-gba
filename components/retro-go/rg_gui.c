@@ -2036,7 +2036,9 @@ void rg_gui_options_menu(void)
         {0, _("Border"),        "-", RG_DIALOG_FLAG_NORMAL, &border_update_cb},
         {0, _("Speed"),         "-", RG_DIALOG_FLAG_NORMAL, &speedup_update_cb},
         // {0, _("Misc options"),  NULL, RG_DIALOG_FLAG_NORMAL, &misc_options_cb},
-        #if !RG_BUILD_RELEASE
+        // Dev builds everywhere, plus release builds on the P4, where the overclock resets
+        // to stock on every power-on and so cannot leave the device unbootable.
+        #if !RG_BUILD_RELEASE || CONFIG_IDF_TARGET_ESP32P4
         {0, _("Overclock"),        "-", RG_DIALOG_FLAG_NORMAL, &overclock_cb},
         #endif
         {0, _("Emulator options"), NULL, RG_DIALOG_FLAG_NORMAL, &app_options_cb},
