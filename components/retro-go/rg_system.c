@@ -100,6 +100,7 @@ static const char *SETTING_AUTOSAVE = "AutoSaveSecs";
 
 static int64_t autoSaveInterval = 0;
 static int64_t nextAutoSave = 0;
+static bool autoSaveBootUpdated = false;
 
 #define logbuf_putc(buf, c) (buf)->console[(buf)->cursor++] = c, (buf)->cursor %= RG_LOGBUF_SIZE;
 #define logbuf_puts(buf, str) for (const char *ptr = str; *ptr; ptr++) logbuf_putc(buf, *ptr);
@@ -847,7 +848,28 @@ void rg_system_tick(int busyTime)
         else if (now >= nextAutoSave)
         {
             nextAutoSave = now + autoSaveInterval;
-            rg_emu_save_state(app.saveSlot);
+
+            // A game started with "New game" carries slot -1, meaning "do not load
+            // anything". That is a fine instruction for startup and a useless one for
+            // saving, so an auto-save with nowhere to go picks slot 0.
+            int slot = app.saveSlot >= 0 ? app.saveSlot : 0;
+
+            if (rg_emu_save_state(slot) && !autoSaveBootUpdated)
+            {
+                // Saving is only half of it. If the power is cut now, the next boot reads
+                // the stored boot config -- and it still says whatever the launcher wrote,
+                // which for a fresh game is "start from the beginning". So point it at the
+                // state we just wrote, or the save is one nobody ever loads.
+                //
+                // Once per session rather than per save: this commits to the card, and
+                // rewriting the same two values every interval is wear for nothing.
+                app.saveSlot = slot;
+                rg_settings_set_number(NS_BOOT, SETTING_BOOT_SLOT, slot);
+                rg_settings_set_number(NS_BOOT, SETTING_BOOT_FLAGS, app.bootFlags | RG_BOOT_RESUME);
+                rg_settings_commit();
+                autoSaveBootUpdated = true;
+                RG_LOGI("Auto-save armed: an unexpected reboot will resume from slot %d", slot);
+            }
         }
     }
 }
@@ -856,6 +878,7 @@ void rg_system_set_autosave_interval(int seconds)
 {
     autoSaveInterval = (int64_t)seconds * 1000000;
     nextAutoSave = 0;
+    autoSaveBootUpdated = false;
     rg_settings_set_number(NS_GLOBAL, SETTING_AUTOSAVE, seconds);
     RG_LOGI("Auto-save interval: %d seconds", seconds);
 }
