@@ -11,6 +11,15 @@ else() # esp-idf 4.1 - 4.4
     set(COMPONENT_REQUIRES "spi_flash fatfs app_update esp_adc_cal json nvs_flash esp_wifi esp_http_client")
 endif()
 
+# Keep the built-in Korean font in step with translations.h. It is a subset font, so a
+# string using a character it does not carry draws as nothing at all -- silently. Done at
+# configure time because the generated .c is compiled in this same pass, and listed as a
+# configure dependency so editing the translations triggers it.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             "${CMAKE_CURRENT_SOURCE_DIR}/translations.h")
+execute_process(COMMAND ${CMAKE_COMMAND} -E env python3
+                        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/regen_font.py")
+
 register_component()
 
 # Small size is preferred because of the small cache and most things here aren't performance sensitive!
