@@ -98,11 +98,15 @@ None of this has run on hardware yet. In rough order of likelihood:
 
 ## Korean
 
-The firmware ships no Korean font. Hangul is thousands of glyphs and the typeface would be
-somebody else's; both are reasons to keep it on the card rather than in every build. Put a
-`.font` file in `/retro-go/fonts/` and it is loaded at boot -- the log says how many it found.
+Korean is built in. Subsetting Noto Sans CJK to the characters the translations actually use
+brings it to 15KB, which is not worth making anyone copy a file for -- and a font someone has
+to remember is a font that is missing when they forget, with a blank menu as the only symptom.
 
-`tools/make_font.py` builds one from any TrueType font, headlessly:
+Extra fonts still load from the card: drop a `.font` file in `/retro-go/fonts/` and it is
+picked up at boot. The log reports how many were loaded either way.
+
+`tools/make_font.py` builds one from any TrueType font, headlessly. This is also how the
+built-in one is regenerated -- `--c-array` emits the same bytes as a C array to compile in:
 
 ```sh
 python3 tools/make_font.py \

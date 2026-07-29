@@ -78,12 +78,21 @@ static void load_fonts_from_storage(void)
         RG_LOGI("Loaded %d font(s) from %s", found, RG_FONTS_PATH);
 }
 
+// Korean, compiled in. Subsetting it to the characters the translations actually use brings
+// Noto Sans CJK down to 15KB, which is nothing against 32MB of flash -- and a font the user
+// has to remember to copy onto the card is a font that is missing when they forget, with a
+// blank menu as the only symptom. Loaded through the same parser as a file so there is only
+// one of them.
+extern const uint8_t font_NotoKR14_data[];
+extern const size_t font_NotoKR14_data_size;
+
 void rg_font_init(void)
 {
     memset(external_fonts, 0, sizeof(external_fonts));
     external_font_count = 0;
+    rg_font_load_from_memory(font_NotoKR14_data, font_NotoKR14_data_size);
     load_fonts_from_storage();
-    RG_LOGI("Font module initialized (%d external)", external_font_count);
+    RG_LOGI("Font module initialized (%d loaded)", external_font_count);
 }
 
 void rg_font_deinit(void)
