@@ -95,3 +95,26 @@ None of this has run on hardware yet. In rough order of likelihood:
 - **Red and blue are swapped.** Frame buffer byte order, one line in the same file.
 - **No sound.** The codec is configured through Espressif's driver, so the likely culprits
   are MCLK not reaching it or the amplifier enable being inverted, not the register values.
+
+## Korean
+
+The firmware ships no Korean font. Hangul is thousands of glyphs and the typeface would be
+somebody else's; both are reasons to keep it on the card rather than in every build. Put a
+`.font` file in `/retro-go/fonts/` and it is loaded at boot -- the log says how many it found.
+
+`tools/make_font.py` builds one from any TrueType font, headlessly:
+
+```sh
+python3 tools/make_font.py \
+    --font /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc --index 1 \
+    --height 14 --name "Noto KR 14" --out ko14.font \
+    --text-from components/retro-go/translations.h
+```
+
+`--text-from` subsets to exactly the characters that file uses, which is why the result is
+about 15KB rather than megabytes. **Regenerate it whenever the Korean translations grow**: a
+character with no glyph draws as nothing at all, so the failure is silent.
+
+Note that the asked-for height is a starting point, not the result -- the tool measures where
+the ink actually lands and declares that instead, because the renderer indexes a buffer of
+exactly `height` rows with no bounds check.
