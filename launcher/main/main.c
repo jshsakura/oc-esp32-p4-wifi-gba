@@ -11,6 +11,7 @@
 
 #include "applications.h"
 #include "bookmarks.h"
+#include "bootsplash.h"
 #include "browser.h"
 #include "gui.h"
 #include "webui.h"
@@ -461,6 +462,11 @@ void app_main(void)
         rg_storage_mkdir(RG_BASE_PATH_CONFIG);
         try_migrate();
     }
+
+    // Only on a real power-on. Coming back from an emulator is a software reset, and a
+    // jingle every time you quit a game would be intolerable.
+    if (app->isColdBoot && rg_storage_ready())
+        bootsplash_show();
 
 #ifdef ESP_PLATFORM
     // The launcher makes a lot of small allocations and it sometimes fills internal RAM, causing the SD Card driver to
