@@ -1,6 +1,0 @@
-nvs, data, nvs, 36864, 16384
-otadata, data, ota, 53248, 8192
-phy_init, data, phy, 61440, 4096
-launcher, app, ota_0, 65536, 983040
-retro-core, app, ota_1, 1048576, 1638400
-gbsp, app, ota_2, 2686976, 1114112

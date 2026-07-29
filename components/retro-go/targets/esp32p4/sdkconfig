@@ -43,13 +43,19 @@ CONFIG_ESPTOOLPY_AFTER_RESET=y
 CONFIG_ESPTOOLPY_MONITOR_BAUD=115200
 
 #
-# Partition Table - Single app for emulator
+# Partition Table
 #
+# rg_tool.py writes partitions.csv at the repo root: a dummy single-app table
+# while building one app, the real multi-app table for build-img. Point esp-idf
+# at it, otherwise the post-build size check runs against esp-idf's own
+# partitions_singleapp_large.csv (factory 0x177000) and retro-core overflows a
+# partition it is never actually flashed to. Same as upstream retro-go.
 CONFIG_PARTITION_TABLE_SINGLE_APP=n
-CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=n
 CONFIG_PARTITION_TABLE_TWO_OTA=n
-CONFIG_PARTITION_TABLE_CUSTOM=n
-CONFIG_PARTITION_TABLE_FILENAME="partitions_singleapp.csv"
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="../partitions.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x8000
 CONFIG_PARTITION_TABLE_MD5=y
 
