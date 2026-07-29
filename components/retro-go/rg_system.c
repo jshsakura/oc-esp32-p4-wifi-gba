@@ -1,4 +1,5 @@
 #include "rg_system.h"
+#include "rg_boot_rescue.h"
 
 #include <sys/time.h>
 #include <stdarg.h>
@@ -281,6 +282,8 @@ static void system_monitor_task(void *arg)
             }
         }
 
+        rg_boot_rescue_tick();
+
         if (statistics.lastTick < rg_system_timer() - app.tickTimeout)
         {
             // App hasn't ticked in a while, listen for MENU presses to give feedback to the user
@@ -306,6 +309,44 @@ static void system_monitor_task(void *arg)
         {
             rg_task_delay((nextLoopTime - rg_system_timer()) / 1000 + 1);
         }
+    }
+}
+
+static void show_boot_rescue_screen(int attempts)
+{
+    char message[160];
+    snprintf(message, sizeof(message),
+             _("%d boots in a row did not finish.\nSettings and auto-resume were skipped."),
+             attempts);
+
+    const rg_gui_option_t options[] = {
+        {0, _("Continue to launcher"), NULL, RG_DIALOG_FLAG_NORMAL, NULL},
+        {1, _("Reset all settings"), NULL, RG_DIALOG_FLAG_NORMAL, NULL},
+        {2, _("Try a normal boot"), NULL, RG_DIALOG_FLAG_NORMAL, NULL},
+        RG_DIALOG_END,
+    };
+
+    rg_gui_alert(_("Boot rescue"), message);
+
+    switch (rg_gui_dialog(_("Boot rescue"), options, 0))
+    {
+    case 1:
+        rg_storage_delete(RG_BASE_PATH_CONFIG);
+        rg_storage_delete(RG_BASE_PATH_CACHE);
+        rg_boot_rescue_clear();
+        rg_system_restart();
+        break;
+    case 2:
+        // The user insists. Believe them once: clear the counter so the next attempt is
+        // treated as fresh, rather than landing straight back on this screen.
+        rg_boot_rescue_clear();
+        rg_system_restart();
+        break;
+    case 0:
+    default:
+        // Fall through into a normal launcher boot. Settings and the stored boot target
+        // have already been skipped, so there is nothing left to undo.
+        break;
     }
 }
 
@@ -407,6 +448,11 @@ rg_app_t *rg_system_init(int sampleRate, const rg_handlers_t *handlers, void *_u
     // Do this very early, may be needed to enable serial console
     platform_init();
 
+    // Before anything that can fail. If this boot never reaches the point where it declares
+    // itself alive, the next one will know.
+    rg_boot_rescue_note_start();
+    bool bootRescue = rg_boot_rescue_due();
+
     esp_reset_reason_t r_reason = esp_reset_reason();
     showCrashDialog = (r_reason == ESP_RST_PANIC);
     app.isColdBoot = r_reason != ESP_RST_SW;
@@ -444,11 +490,18 @@ rg_app_t *rg_system_init(int sampleRate, const rg_handlers_t *handlers, void *_u
         rg_task_delay(100);
     }
 
-    rg_settings_init(enterRecoveryMode || showCrashDialog);
-    app.configNs = rg_settings_get_string(NS_BOOT, SETTING_BOOT_NAME, app.configNs);
-    app.bootArgs = rg_settings_get_string(NS_BOOT, SETTING_BOOT_ARGS, app.bootArgs);
-    app.bootFlags = rg_settings_get_number(NS_BOOT, SETTING_BOOT_FLAGS, app.bootFlags);
-    app.saveSlot = rg_settings_get_number(NS_BOOT, SETTING_BOOT_SLOT, app.saveSlot);
+    // A rescue boot reads no stored settings and honours no stored boot target. Those two
+    // are what a normal boot does next, and between them they are the likeliest reason the
+    // last attempts died -- a setting the core chokes on, or an auto-resume into a ROM that
+    // brings the system down before anyone can reach a menu.
+    rg_settings_init(enterRecoveryMode || showCrashDialog || bootRescue);
+    if (!bootRescue)
+    {
+        app.configNs = rg_settings_get_string(NS_BOOT, SETTING_BOOT_NAME, app.configNs);
+        app.bootArgs = rg_settings_get_string(NS_BOOT, SETTING_BOOT_ARGS, app.bootArgs);
+        app.bootFlags = rg_settings_get_number(NS_BOOT, SETTING_BOOT_FLAGS, app.bootFlags);
+        app.saveSlot = rg_settings_get_number(NS_BOOT, SETTING_BOOT_SLOT, app.saveSlot);
+    }
     rg_display_init();
     
     // Load language setting early for panic dialog translation
@@ -461,6 +514,10 @@ rg_app_t *rg_system_init(int sampleRate, const rg_handlers_t *handlers, void *_u
     if (enterRecoveryMode)
     {
         enter_recovery_mode();
+    }
+    else if (bootRescue)
+    {
+        show_boot_rescue_screen(rg_boot_rescue_count());
     }
     else if (showCrashDialog)
     {
@@ -776,6 +833,9 @@ void rg_system_event(int event, void *arg)
 static void shutdown_cleanup(void)
 {
     exitCalled = true;
+    // Reaching here at all means the firmware was healthy enough to be asked to stop, which
+    // is as good a proof of a successful boot as running for a while is.
+    rg_boot_rescue_clear();
     rg_display_clear(C_BLACK);                // Let the user know that something is happening
     rg_gui_draw_hourglass();                  // ...
     rg_system_event(RG_EVENT_SHUTDOWN, NULL); // Allow apps to save their state if they want
