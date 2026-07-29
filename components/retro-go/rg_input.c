@@ -150,16 +150,53 @@ bool rg_input_read_gamepad_raw(uint32_t *out)
 #endif
 
 #if defined(RG_GAMEPAD_I2C_MAP)
-    uint32_t buttons = 0;
-    uint8_t data[5];
-    if (rg_i2c_read(RG_I2C_GPIO_ADDR, -1, &data, 5))
+// Only boards using the legacy single-device path define this. A board whose map gives
+// every entry an explicit address never reaches the fallback, so 0 is fine as a stand-in.
+#ifndef RG_I2C_GPIO_ADDR
+#define RG_I2C_GPIO_ADDR 0
+#endif
+    // The map may span several chips (an expander beside each cluster of buttons keeps
+    // their wiring short). Read each distinct device once per poll rather than once per
+    // key: at ~13 keys a naive loop would put a dozen transactions on the bus every frame,
+    // on a bus the audio codec also lives on.
+    struct { int addr, reg; uint32_t bits; bool ok; } devs[RG_COUNT(keymap_i2c)];
+    size_t ndevs = 0;
+
+    for (size_t i = 0; i < RG_COUNT(keymap_i2c); ++i)
     {
-        buttons = (data[2] << 8) | (data[1]);
-        for (size_t i = 0; i < RG_COUNT(keymap_i2c); ++i)
+        int addr = keymap_i2c[i].addr ? keymap_i2c[i].addr : RG_I2C_GPIO_ADDR;
+        int reg = keymap_i2c[i].addr ? keymap_i2c[i].reg : -1;
+        size_t d = 0;
+        while (d < ndevs && !(devs[d].addr == addr && devs[d].reg == reg))
+            ++d;
+        if (d == ndevs)
         {
-            const rg_keymap_i2c_t *mapping = &keymap_i2c[i];
-            if (((buttons >> mapping->num) & 1) == mapping->level)
+            uint8_t data[5] = {0};
+            // A device selected by register (an 8-bit expander) answers with one byte.
+            // The legacy path reads five and takes bytes 1 and 2 as a 16-bit word.
+            size_t len = keymap_i2c[i].addr ? 1 : 5;
+            devs[ndevs].addr = addr;
+            devs[ndevs].reg = reg;
+            devs[ndevs].ok = rg_i2c_read(addr, reg, &data, len);
+            devs[ndevs].bits = (len == 1) ? data[0] : (uint32_t)((data[2] << 8) | data[1]);
+            ndevs++;
+        }
+    }
+
+    for (size_t i = 0; i < RG_COUNT(keymap_i2c); ++i)
+    {
+        const rg_keymap_i2c_t *mapping = &keymap_i2c[i];
+        int addr = mapping->addr ? mapping->addr : RG_I2C_GPIO_ADDR;
+        int reg = mapping->addr ? mapping->reg : -1;
+        for (size_t d = 0; d < ndevs; ++d)
+        {
+            if (devs[d].addr != addr || devs[d].reg != reg)
+                continue;
+            // A chip that did not answer reports nothing rather than every key at once:
+            // with active low buttons an unread 0 would look like the whole pad held down.
+            if (devs[d].ok && ((devs[d].bits >> mapping->num) & 1) == (uint32_t)mapping->level)
                 state |= mapping->key;
+            break;
         }
     }
 #endif

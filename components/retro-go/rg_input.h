@@ -53,6 +53,11 @@ typedef struct
     int pullup;   // Enable pullup (if supported by chip, currently MCP23017)
     int pulldown; // Enable pullup (if supported by chip, currently none)
     int level;    // 0-1
+    // A board may spread its buttons over more than one chip -- putting an expander next
+    // to each cluster of buttons is what keeps their wiring off the far side of the board.
+    // Leave both at 0 for the legacy single-device behaviour.
+    int addr;     // I2C device address, 0 = RG_I2C_GPIO_ADDR
+    int reg;      // register to read, or -1 for a bare read with no register byte
 } rg_keymap_i2c_t;
 
 // #define RG_GAMEPAD_KBD_MAP {{}, ...} for Keyboard driver
