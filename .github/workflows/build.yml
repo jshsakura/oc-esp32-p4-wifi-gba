@@ -1,0 +1,73 @@
+# Build every target on every push.
+#
+# This exists because the build has broken silently twice already, in ways a person would not
+# notice: config.h once included one target's pinout no matter which target you asked for, so
+# every build "succeeded" and produced the same binary; and the tool decided an app's
+# generated sdkconfig was current by comparing the chip name, which cannot tell three boards
+# on the same chip apart, so one target quietly compiled with another's options and audio
+# stopped working. Both produced a green build and a wrong image.
+#
+# Building all three targets catches the first -- their binaries differ -- and building them
+# in sequence catches the second, since that is exactly the order that triggered it.
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [oc-gba, oc-gba-devkit, esp32p4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build all apps
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          python3 rg_tool.py --target ${{ matrix.target }} build-img
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.target }}
+          path: retro-go_*_${{ matrix.target }}.img
+          if-no-files-found: error
+
+  tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install Pillow
+
+      - name: Font builder produces something the renderer can read
+        run: |
+          python3 tools/make_font.py --font /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
+              --height 14 --name "CI" --out /tmp/ci.font --range 0x20-0x7E
+          # Walk it the way rg_gui.c does and check every glyph stays inside the declared
+          # height and the 32-bit row, since the renderer bounds-checks neither.
+          python3 - <<'PY'
+          import struct
+          d = open('/tmp/ci.font','rb').read()
+          _, _, height, _, count = struct.unpack("<BBBBI", d[16:24])
+          p, seen = 24, 0
+          while True:
+              cp, yo, w, h, xo, xd = struct.unpack("<HBBBBB", d[p:p+7])
+              if cp == 0:
+                  break
+              assert yo + h <= height, f"U+{cp:04X} ink past declared height"
+              assert xo + w <= 32, f"U+{cp:04X} wider than the row"
+              p += 7 + (((w*h - 1)//8 + 1) if w else 0)
+              seen += 1
+          assert seen == count, f"header says {count} glyphs, found {seen}"
+          assert p + 7 == len(d), "trailing bytes after the terminator"
+          print(f"{seen} glyphs, {len(d)} bytes, height {height}")
+          PY
