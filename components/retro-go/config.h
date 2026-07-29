@@ -1,4 +1,19 @@
+// rg_tool.py turns the target directory name into RG_TARGET_<NAME> and passes it as a
+// compiler define. Dispatch on it rather than hardcoding one target: this file used to
+// include targets/esp32p4/config.h unconditionally, so every --target built the esp32p4
+// pinout and produced a byte-identical binary while appearing to succeed.
+//
+// The #error is the point of the exercise. A target that is not listed here must fail to
+// build, not quietly inherit somebody else's board.
+#if defined(RG_TARGET_OC_GBA)
+#include "targets/oc-gba/config.h"
+#elif defined(RG_TARGET_ESP32P4)
 #include "targets/esp32p4/config.h"
+#elif defined(RG_TARGET_ESP32_P4BACKUP)
+#include "targets/esp32-p4backup/config.h"
+#else
+#error "No target selected. Build with rg_tool.py --target <name>, and add the target here."
+#endif
 
 #ifndef RG_PROJECT_NAME
 #define RG_PROJECT_NAME "Retro-Go"
