@@ -219,6 +219,10 @@ void rg_system_set_indicator_mask(rg_indicator_t indicator, bool on);
 bool rg_system_get_indicator_mask(rg_indicator_t indicator);
 bool rg_system_set_led_color(rg_color_t color);
 rg_color_t rg_system_get_led_color(void);
+// Seconds between automatic save states while a game runs, 0 to disable. Exists because a
+// hard power switch gives the firmware no chance to save on the way down.
+void rg_system_set_autosave_interval(int seconds);
+int rg_system_get_autosave_interval(void);
 void rg_system_set_tick_rate(int tickRate);
 int rg_system_get_tick_rate(void);
 void rg_system_set_overclock(int level);

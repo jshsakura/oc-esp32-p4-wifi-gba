@@ -1589,6 +1589,29 @@ static rg_gui_event_t speedup_update_cb(rg_gui_option_t *option, rg_gui_event_t 
     return RG_DIALOG_VOID;
 }
 
+static rg_gui_event_t autosave_update_cb(rg_gui_option_t *option, rg_gui_event_t event)
+{
+    // Off, then a few intervals. Short ones cost a visible hitch while the state is written,
+    // so the choice is really "how much progress am I willing to lose".
+    static const int steps[] = {0, 15, 30, 60, 120, 300};
+    int current = rg_system_get_autosave_interval();
+    int index = 0;
+    for (size_t i = 0; i < RG_COUNT(steps); ++i)
+        if (steps[i] == current)
+            index = (int)i;
+
+    if (event == RG_DIALOG_PREV && index > 0)
+        rg_system_set_autosave_interval(steps[--index]);
+    if (event == RG_DIALOG_NEXT && index < (int)RG_COUNT(steps) - 1)
+        rg_system_set_autosave_interval(steps[++index]);
+
+    if (steps[index] == 0)
+        strcpy(option->value, _("Off"));
+    else
+        sprintf(option->value, "%ds", steps[index]);
+    return RG_DIALOG_VOID;
+}
+
 static rg_gui_event_t led_indicator_opt_cb(rg_gui_option_t *option, rg_gui_event_t event)
 {
     if (event == RG_DIALOG_PREV || event == RG_DIALOG_NEXT)
@@ -2035,6 +2058,7 @@ void rg_gui_options_menu(void)
         {0, _("Filter"),        "-", RG_DIALOG_FLAG_NORMAL, &filter_update_cb},
         {0, _("Border"),        "-", RG_DIALOG_FLAG_NORMAL, &border_update_cb},
         {0, _("Speed"),         "-", RG_DIALOG_FLAG_NORMAL, &speedup_update_cb},
+        {0, _("Auto-save"),     "-", RG_DIALOG_FLAG_NORMAL, &autosave_update_cb},
         // {0, _("Misc options"),  NULL, RG_DIALOG_FLAG_NORMAL, &misc_options_cb},
         // Dev builds everywhere, plus release builds on the P4, where the overclock resets
         // to stock on every power-on and so cannot leave the device unbootable.

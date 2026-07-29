@@ -19,6 +19,11 @@ static const char *language_names[RG_LANG_MAX] = {
 static const char *translations[][RG_LANG_MAX] =
 {
     {
+        [RG_LANG_EN] = "Auto-save",
+        [RG_LANG_ZH] = "自动保存",
+        [RG_LANG_KO] = "자동 저장",
+    },
+    {
         [RG_LANG_EN] = "Never",
         [RG_LANG_ZH] = "从不",
         [RG_LANG_KO] = "안 함",

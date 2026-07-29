@@ -96,6 +96,10 @@ static const char *SETTING_BOOT_FLAGS = "BootFlags";
 static const char *SETTING_TIMEZONE = "Timezone";
 static const char *SETTING_INDICATOR_MASK = "Indicators";
 static const char *SETTING_LOG_LEVEL = "LogLevel";
+static const char *SETTING_AUTOSAVE = "AutoSaveSecs";
+
+static int64_t autoSaveInterval = 0;
+static int64_t nextAutoSave = 0;
 
 #define logbuf_putc(buf, c) (buf)->console[(buf)->cursor++] = c, (buf)->cursor %= RG_LOGBUF_SIZE;
 #define logbuf_puts(buf, str) for (const char *ptr = str; *ptr; ptr++) logbuf_putc(buf, *ptr);
@@ -552,6 +556,8 @@ rg_app_t *rg_system_init(int sampleRate, const rg_handlers_t *handlers, void *_u
     app.indicatorsMask = rg_settings_get_number(NS_GLOBAL, SETTING_INDICATOR_MASK, app.indicatorsMask);
     app.romPath = app.bootArgs ?: ""; // For whatever reason some of our code isn't NULL-aware, sigh..
 
+    autoSaveInterval = (int64_t)rg_settings_get_number(NS_GLOBAL, SETTING_AUTOSAVE, 0) * 1000000;
+
     int saved_log_level = rg_settings_get_number(NS_GLOBAL, SETTING_LOG_LEVEL, -1);
     if (saved_log_level >= 0 && saved_log_level < RG_LOG_MAX)
     {
@@ -820,6 +826,43 @@ void rg_system_tick(int busyTime)
     statistics.lastTick = rg_system_timer();
     statistics.busyTime += busyTime;
     statistics.ticks++;
+
+    // Periodic auto-save, so losing power costs seconds rather than the session.
+    //
+    // The handhelds people like best save on the way down: you flip the switch, the system
+    // is told, it writes a state, and next time you are exactly where you were. That needs
+    // the machine to know it is being turned off. This one has a hard slide switch in the 5V
+    // line -- when it moves everything stops mid-instruction, with no warning and nothing to
+    // hook. Saving on a timer is what is left, and it gets most of the way there: the resume
+    // half already works, since every core calls rg_emu_load_state(app->saveSlot) on start.
+    //
+    // Here rather than in the monitor task on purpose. rg_system_tick is called by the
+    // emulator itself at the end of a frame, so the machine state is coherent; a save fired
+    // from another task would catch it mid-frame.
+    if (autoSaveInterval > 0 && !app.isLauncher && app.romPath && *app.romPath)
+    {
+        int64_t now = rg_system_timer();
+        if (nextAutoSave == 0)
+            nextAutoSave = now + autoSaveInterval;
+        else if (now >= nextAutoSave)
+        {
+            nextAutoSave = now + autoSaveInterval;
+            rg_emu_save_state(app.saveSlot);
+        }
+    }
+}
+
+void rg_system_set_autosave_interval(int seconds)
+{
+    autoSaveInterval = (int64_t)seconds * 1000000;
+    nextAutoSave = 0;
+    rg_settings_set_number(NS_GLOBAL, SETTING_AUTOSAVE, seconds);
+    RG_LOGI("Auto-save interval: %d seconds", seconds);
+}
+
+int rg_system_get_autosave_interval(void)
+{
+    return (int)(autoSaveInterval / 1000000);
 }
 
 IRAM_ATTR int64_t rg_system_timer(void)
