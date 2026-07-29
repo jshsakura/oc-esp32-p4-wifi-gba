@@ -7,6 +7,8 @@
 // build, not quietly inherit somebody else's board.
 #if defined(RG_TARGET_OC_GBA)
 #include "targets/oc-gba/config.h"
+#elif defined(RG_TARGET_OC_GBA_DEVKIT)
+#include "targets/oc-gba-devkit/config.h"
 #elif defined(RG_TARGET_ESP32P4)
 #include "targets/esp32p4/config.h"
 #elif defined(RG_TARGET_ESP32_P4BACKUP)

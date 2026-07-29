@@ -427,8 +427,17 @@ rg_app_t *rg_system_init(int sampleRate, const rg_handlers_t *handlers, void *_u
     rg_storage_init();
     rg_input_init();
 
-    // Test for recovery request as early as possible
-    for (int timeout = 5, btn; (btn = rg_input_read_gamepad() & RG_RECOVERY_BTN) && timeout >= 0; --timeout)
+    // Test for recovery request as early as possible.
+    //
+    // RG_RECOVERY_BTN defaults to RG_KEY_ANY, which means any single button held at power
+    // on drops the device into recovery. That is fine for a dev board and wrong for
+    // something in a shell, where a button can sit pressed against the case. A target that
+    // names specific keys now has to have all of them held, so a chord is a chord; naming
+    // RG_KEY_ANY keeps the old any-button behaviour for everything else.
+    #define RG_RECOVERY_HELD(b) \
+        (RG_RECOVERY_BTN == RG_KEY_ANY ? ((b) != 0) : (((b) & RG_RECOVERY_BTN) == RG_RECOVERY_BTN))
+
+    for (int timeout = 5, btn; RG_RECOVERY_HELD(btn = rg_input_read_gamepad()) && timeout >= 0; --timeout)
     {
         RG_LOGW("Button " PRINTF_BINARY_16 " being held down...\n", PRINTF_BINVAL_16(btn));
         enterRecoveryMode = (timeout == 0);

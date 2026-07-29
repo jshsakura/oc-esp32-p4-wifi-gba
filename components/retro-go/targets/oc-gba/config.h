@@ -198,3 +198,13 @@
 
 // Status LED -- the GBA shell has a power LED but the board does not drive it from a GPIO.
 #define RG_GPIO_LED                 GPIO_NUM_NC
+
+// ---------------------------------------------------------------------------
+// Failing gracefully
+// ---------------------------------------------------------------------------
+
+// Hold these together at power on to reach recovery mode, which starts with settings
+// disabled so a bad setting cannot lock you out. It has to be a deliberate chord: the
+// default is "any button", and in a shell a button can rest against the case and boot
+// the thing into recovery every time.
+#define RG_RECOVERY_BTN             (RG_KEY_START | RG_KEY_SELECT | RG_KEY_L | RG_KEY_R)
