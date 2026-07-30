@@ -377,13 +377,24 @@ static void lcd_init(void)
     if (!st7701_init_done)
         RG_PANIC("Failed to create panel init semaphore");
 
-    if (xTaskCreate(st7701_panel_init_task, "st7701_init", 4096, NULL, 5, NULL) != pdPASS)
+    TaskHandle_t init_task = NULL;
+    if (xTaskCreate(st7701_panel_init_task, "st7701_init", 4096, NULL, 5, &init_task) != pdPASS)
         RG_PANIC("Failed to start panel init task");
 
     if (xSemaphoreTake(st7701_init_done, pdMS_TO_TICKS(ST7701_INIT_TIMEOUT_MS)) != pdTRUE) {
         RG_LOGE("Panel did not answer in %d ms -- is the DSI ribbon connected?",
                 ST7701_INIT_TIMEOUT_MS);
         RG_LOGE("Continuing without a display. Everything else still runs.");
+
+        // "Abandoned" turned out to mean "still running at priority 5". The task is not
+        // blocked in the driver as assumed -- it spins, and FreeRTOS run-time stats on a
+        // board with no panel attached showed it taking 90% of the CPU while the emulator
+        // task got 2%. Every measurement made in that state was really a measurement of
+        // this. It is still not safe to delete (it holds the DSI lock), so it is demoted
+        // instead: it may keep spinning, but only in time nothing else wants.
+        if (init_task)
+            vTaskPrioritySet(init_task, tskIDLE_PRIORITY + 1);
+
         st7701_ctx.framebuffer = NULL;
         st7701_ctx.initialized = false;
         return;

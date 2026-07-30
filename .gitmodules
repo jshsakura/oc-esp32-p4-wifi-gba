@@ -2,3 +2,7 @@
 	path = external/zelda3
 	url = https://github.com/jshsakura/zelda3.git
 	branch = ko-dialogue
+[submodule "external/fake-08"]
+	path = external/fake-08
+	url = https://github.com/jshsakura/fake-08.git
+	branch = esp32p4-retro-go
