@@ -68,6 +68,9 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
 CONFIG_COMPILER_FLOAT_LIB_FROM_RVFPLIB=y
 CONFIG_COMPILER_HIDE_PATHS_MACROS=y
+# See the note in oc-gba/sdkconfig: the PICO-8 app needs C++ exceptions because Lua's error
+# handling is throw/catch, and pcall() is not optional for running carts.
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
 
 #
 # FreeRTOS - Optimized for dual-core emulator

@@ -693,6 +693,9 @@ void applications_init(void)
     // application("Neo Geo Pocket Color", "ngp", "ngp ngc zip", "ngpocket-go", 0);
     application("DOOM", "doom", "wad zip", "prboom-go", 0);
     application("MSX", "msx", "rom mx1 mx2 dsk", "fmsx", 0);
+    // Carts are either .p8 text or .p8.png, where the cart is steganographed into the pixels
+    // of the label image -- so "png" here is a cart extension, not a cover.
+    application("PICO-8", "p8", "p8 png", "fake08", 0);
 
     // Special app to bootstrap native esp32 binaries from the SD card
     // application("Bootstrap", "apps", "bin elf", "bootstrap", 0);
