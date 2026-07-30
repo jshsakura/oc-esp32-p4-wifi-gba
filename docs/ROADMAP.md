@@ -105,6 +105,13 @@ u16 palette_ram[512], oam_ram[512];  // 2KB
 ### Phase 1 — 표시/입력/사운드 파이프라인 확정
 
 - **CPU 블릿 제거.** `components/retro-go/drivers/display/st7701.h`의 `lcd_send_buffer()`가 회전·바이트스왑을 픽셀 단위 루프로 처리 중. Phase 2의 전제조건.
+  - **2026-07-30 실측: 프레임당 13ms** (128×128 팔레트 → 480×480, 패널 미연결). PICO-8 앱으로 쟀고,
+    코어 1의 `rg_display` 태스크에서 일어나므로 에뮬레이터와 병렬로 돈다. 여전히 걷어낼 값어치는
+    있지만 **긴급하지는 않다.** 패널이 오면 DPI 프레임버퍼 대상으로 다시 잴 것.
+  - ⚠️ 이 줄은 한 번 틀리게 적혔었다. "블릿이 CPU의 98%"라고 썼는데, 실제로는 패널이 응답하지 않을 때
+    포기하고 남겨둔 `st7701_init` 태스크가 우선순위 5로 계속 돌면서 90%를 먹고 있었다
+    ([BRINGUP.md](BRINGUP.md) 참조). 그 상태에서 잰 모든 수치는 그 태스크를 잰 것이었다.
+    **패널 없이 성능을 잴 때는 FreeRTOS 런타임 통계로 누가 CPU를 쓰는지부터 확인할 것.**
   - 후보 1: **PPA / 2D-DMA** (스케일·회전)
   - 후보 2: **`xesppie`** — 툴체인 `-march`에 붙어 있는 Espressif 벤더 SIMD 확장
 - 오디오 버퍼·지연 확정
@@ -341,7 +348,9 @@ return false;  /* ❌ 条件分支导致ROM卡死 */  (조건 분기가 ROM을 �
 
 ## 부록 D. 다음에 확인할 것
 
-- [ ] **Q1: P4에서 PSRAM 영역 명령어 인출 가부** — Phase 2b. **최우선**
+- [ ] **Q1: P4에서 PSRAM 영역 명령어 인출 가부** — Phase 2b. **최우선.**
+      프로브 작성됨(`components/retro-go/rg_psram_exec_test.c`). SD에 `/retro-go/psram_exec_test`를
+      두고 부팅하면 실행된다 — 절차와 판독법은 [BRINGUP.md A1](BRINGUP.md). 패널도 버튼도 필요 없다
 - [ ] Q2: SMC 추적 배열 288KB 축소 가능성 — Phase 2e
 - [ ] Q3: 코드 생성 후 캐시 유지보수 절차 (`fence.i` + L2 라이트백) — Phase 2d
 - [ ] `gbsp` 인터프리터 실측 fps (기준선) — Phase 2a, 실기 필요
