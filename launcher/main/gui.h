@@ -113,6 +113,7 @@ typedef struct tab_s {
     rg_image_t *logo;
     rg_image_t *preview;
     int background_shade;
+    bool background_suppressed;
     gui_event_handler_t event_handler;
 } tab_t;
 

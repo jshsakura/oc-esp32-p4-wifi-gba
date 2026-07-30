@@ -3,8 +3,8 @@
     "website": "https://github.com/ducalex/retro-go/",
     "author": "ducalex",
     "dialog": {
-        "__comment": "This section contains global dialog colors",
-        "background": "0x0010",
+        "__comment": "Analogue OS dark: pure black panels, inverted selection bar, dim border",
+        "background": "0x0000",
         "foreground": "0xFFFF",
         "border": "0x6B4D",
         "header": "0xFFFF",
@@ -15,13 +15,13 @@
         "item_message": "0xBDF7"
     },
     "launcher_1": {
-        "__comment": "This section contains launcher colors variant 1",
+        "__comment": "Analogue OS-inspired dark-minimal: black bg, near-white text, inverted white selection bar",
         "background": "0x0000",
-        "foreground": "0xFFDE",
+        "foreground": "0xFFFF",
         "list_standard_bg": "transparent",
-        "list_standard_fg": "0x8410",
-        "list_selected_bg": "transparent",
-        "list_selected_fg": "0xFFFF"
+        "list_standard_fg": "0xFFFF",
+        "list_selected_bg": "0xFFFF",
+        "list_selected_fg": "0x0000"
     },
     "launcher_2": {
         "__comment": "This section contains launcher colors variant 2",

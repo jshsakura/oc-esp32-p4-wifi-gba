@@ -71,3 +71,30 @@ jobs:
           assert p + 7 == len(d), "trailing bytes after the terminator"
           print(f"{seen} glyphs, {len(d)} bytes, height {height}")
           PY
+
+      - name: Committed high-res font is well-formed
+        run: |
+          # The previous step validates a freshly generated font; this one walks the
+          # ACTUAL bytes committed in DejaVu24.c, since the renderer bounds-checks
+          # neither glyph height nor row width and a malformed shipped font would
+          # corrupt every screen on the oc-gba target.
+          python3 - <<'PY'
+          import re, struct
+          src = open('components/retro-go/fonts/DejaVu24.c').read()
+          m = re.search(r'font_DejaVu24_data\[\]\s*=\s*\{([^}]+)\}', src, re.S)
+          assert m, "font_DejaVu24_data array not found"
+          d = bytes(int(x, 16) for x in re.findall(r'0x[0-9A-Fa-f]{2}', m.group(1)))
+          _, _, height, _, count = struct.unpack("<BBBBI", d[16:24])
+          p, seen = 24, 0
+          while True:
+              cp, yo, w, h, xo, xd = struct.unpack("<HBBBBB", d[p:p+7])
+              if cp == 0:
+                  break
+              assert yo + h <= height, f"U+{cp:04X} ink past declared height"
+              assert xo + w <= 32, f"U+{cp:04X} wider than the row"
+              p += 7 + (((w*h - 1)//8 + 1) if w else 0)
+              seen += 1
+          assert seen == count, f"header says {count} glyphs, found {seen}"
+          assert p + 7 == len(d), "trailing bytes after the terminator"
+          print(f"DejaVu24: {seen} glyphs, {len(d)} bytes, height {height}")
+          PY

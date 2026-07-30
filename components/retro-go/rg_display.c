@@ -34,6 +34,7 @@ static const char *SETTING_SCALING = "DispScaling";
 static const char *SETTING_FILTER = "DispFilter";
 static const char *SETTING_ROTATION = "DispRotation";
 static const char *SETTING_BORDER = "DispBorder";
+static const char *SETTING_SCANLINE = "DispScanline";
 static const char *SETTING_CUSTOM_ZOOM = "DispCustomZoom";
 
 static void lcd_init(void);
@@ -205,6 +206,28 @@ static inline void write_update(const rg_surface_t *update)
             }
         }
 
+        // CRT scanline effect: halve the brightness of every other physical
+        // output line. line_buffer holds big-endian 565, so the byte swap and
+        // 0xF7DE mask mirror blend_pixels. Only odd rows are touched, so the
+        // cost is half a frame's worth of pixel ops -- trivial on the P4.
+        if (config.scanline && need_update)
+        {
+            int batch_top = y - lines_to_copy;
+            for (int i = 0; i < lines_to_copy; ++i)
+            {
+                if ((draw_top + batch_top + i) & 1)
+                {
+                    uint16_t *line = line_buffer + i * draw_width;
+                    for (int x = 0; x < draw_width; ++x)
+                    {
+                        unsigned p = (line[x] << 8) | (line[x] >> 8);
+                        p = (p & 0xF7DE) >> 1;
+                        line[x] = (p << 8) | (p >> 8);
+                    }
+                }
+            }
+        }
+
         if (need_update)
         {
             int left = display.screen.margins.left + draw_left;
@@ -258,6 +281,34 @@ static void update_viewport_scaling(void)
     {
         new_width = FLOAT_TO_INT(src_width * config.custom_zoom);
         new_height = FLOAT_TO_INT(src_height * config.custom_zoom);
+    }
+    else if (config.scaling == RG_DISPLAY_SCALING_INT)
+    {
+        // Largest integer factor that fits both axes -- every source pixel maps
+        // to an exact N×N block, so there is no fractional resampling and pixels
+        // stay razor-sharp. The price is letterboxing (e.g. GBA 240x160 x3 =
+        // 720x480 on an 800-wide panel leaves 40px bars), which the panel's
+        // shell opening usually hides.
+        int factor = RG_MIN(screen_width / src_width, screen_height / src_height);
+        if (factor < 1)
+            factor = 1;
+        new_width = src_width * factor;
+        new_height = src_height * factor;
+    }
+    else if (config.scaling == RG_DISPLAY_SCALING_4_3)
+    {
+        // Force a 4:3 output rectangle regardless of the source pixel aspect,
+        // then stretch the source into it. This is the CRT-correct look for
+        // systems like the NES/SNES/PCE whose square pixels were displayed at
+        // 4:3. On an 800x480 (5:3) panel this yields a 640x480 image centred
+        // with 80px side bars.
+        new_height = screen_height;
+        new_width = screen_height * 4 / 3;
+        if (new_width > screen_width)
+        {
+            new_width = screen_width;
+            new_height = screen_width * 3 / 4;
+        }
     }
 
     // Everything works better when we use even dimensions!
@@ -397,6 +448,19 @@ void rg_display_set_custom_zoom(double factor)
 double rg_display_get_custom_zoom(void)
 {
     return config.custom_zoom;
+}
+
+void rg_display_set_scanline(bool on)
+{
+    config.scanline = on;
+    rg_settings_set_boolean(NS_APP, SETTING_SCANLINE, on);
+    // Force a full redraw so the effect applies to the current frame.
+    memset(screen_line_checksum, 0xFF, sizeof(screen_line_checksum));
+}
+
+bool rg_display_get_scanline(void)
+{
+    return config.scanline;
 }
 
 void rg_display_set_filter(display_filter_t filter)
@@ -602,6 +666,7 @@ void rg_display_init(void)
         .rotation = rg_settings_get_number(NS_APP, SETTING_ROTATION, RG_DISPLAY_ROTATION_AUTO),
         .border_file = rg_settings_get_string(NS_APP, SETTING_BORDER, NULL),
         .custom_zoom = rg_settings_get_number(NS_APP, SETTING_CUSTOM_ZOOM, 1.0),
+        .scanline = rg_settings_get_boolean(NS_APP, SETTING_SCANLINE, false),
     };
     display = (rg_display_t){
         .screen.real_width = RG_SCREEN_WIDTH,

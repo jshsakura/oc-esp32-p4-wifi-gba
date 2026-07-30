@@ -9,6 +9,8 @@ typedef enum
     RG_DISPLAY_SCALING_FIT,     // Scale and preserve aspect ratio
     RG_DISPLAY_SCALING_FULL,    // Scale and stretch to fill screen
     RG_DISPLAY_SCALING_ZOOM,  // Custom zoom and preserve aspect ratio
+    RG_DISPLAY_SCALING_INT,   // Integer scaling: sharpest pixels, may letterbox
+    RG_DISPLAY_SCALING_4_3,   // Force 4:3 output (CRT-correct for NES/SNES/PCE)
     RG_DISPLAY_SCALING_COUNT
 } display_scaling_t;
 
@@ -50,6 +52,7 @@ typedef struct
     display_backlight_t backlight;
     char *border_file;
     double custom_zoom;
+    bool scanline; // CRT effect: darken every other output line on emulator frames
 } rg_display_config_t;
 
 typedef struct
@@ -126,3 +129,5 @@ void rg_display_set_border(const char *filename);
 char *rg_display_get_border(void);
 void rg_display_set_custom_zoom(double factor);
 double rg_display_get_custom_zoom(void);
+void rg_display_set_scanline(bool on);
+bool rg_display_get_scanline(void);

@@ -104,6 +104,23 @@ static int get_vertical_position(int y_pos, int height)
 void rg_gui_init(void)
 {
     rg_font_init();
+#ifdef RG_FONT_DEFAULT_NAME
+    // DejaVu24 was inserted as the first external font on this target, which shifts every
+    // external index saved before the change by one. Bump stored external selections once,
+    // BEFORE the language/font setup below touches FontType, so an auto-switched Korean
+    // face (saved at the new index) is not mistaken for a stale pre-migration value.
+    if (!rg_settings_get_number(NS_GLOBAL, "FontIdxMig", 0))
+    {
+        int saved = rg_settings_get_number(NS_GLOBAL, SETTING_FONTTYPE, RG_FONT_DEFAULT);
+        if (saved >= RG_FONT_BUILTIN_MAX)
+        {
+            rg_settings_set_number(NS_GLOBAL, SETTING_FONTTYPE, saved + 1);
+            rg_settings_commit();
+        }
+        rg_settings_set_number(NS_GLOBAL, "FontIdxMig", 1);
+        rg_settings_commit();
+    }
+#endif
     gui.screen_width = rg_display_get_width();
     gui.screen_height = rg_display_get_height();
     // FIXME: RG_SCREEN_SAFE_AREA being added on top of RG_SCREEN_VISIBLE_AREA might not be super intuitive
@@ -122,7 +139,29 @@ void rg_gui_init(void)
     }
     if (!rg_gui_set_language_id(lang_id))
         rg_gui_set_language_id(0);
-    if (!rg_gui_set_font(rg_settings_get_number(NS_GLOBAL, SETTING_FONTTYPE, RG_FONT_DEFAULT)))
+    // A target may name a preferred default face (e.g. a high-res one for a large panel)
+    // via RG_FONT_DEFAULT_NAME in its config.h. We only adopt it when the user has not
+    // picked a font of their own, so an explicit choice is never overridden on reboot.
+    int default_font = rg_settings_get_number(NS_GLOBAL, SETTING_FONTTYPE, RG_FONT_DEFAULT);
+#ifdef RG_FONT_DEFAULT_NAME
+    // Only adopt the target's preferred face when the user has never picked a
+    // font of their own. Checking existence (rather than value == default)
+    // tells "unset" apart from "explicitly chose the default index", so an
+    // explicit choice is never overridden on reboot.
+    if (!rg_settings_exists(NS_GLOBAL, SETTING_FONTTYPE))
+    {
+        for (int f = 0; f < rg_font_get_combined_count(); f++)
+        {
+            const char *name = rg_font_get_combined_name(f);
+            if (name && strcmp(name, RG_FONT_DEFAULT_NAME) == 0)
+            {
+                default_font = f;
+                break;
+            }
+        }
+    }
+#endif
+    if (!rg_gui_set_font(default_font))
         rg_gui_set_font(0);
     rg_gui_set_theme(rg_settings_get_string(NS_GLOBAL, SETTING_THEME, NULL));
     gui.initialized = true;
@@ -140,6 +179,31 @@ bool rg_gui_set_language_id(int index)
         {
             rg_gui_set_font(RG_FONT_LXGW_LITE);
             RG_LOGI("Auto-switched to Chinese font");
+        }
+
+        // Auto-switch to the Korean (Hangul) font when switching to Korean.
+        // NotoKR is a compiled-in external font, so look it up by name rather
+        // than hard-coding an index -- the same way a user-picked SD font would.
+        if (index == RG_LANG_KO)
+        {
+            const char *cur = rg_font_get_combined_name(gui.font_index);
+            if (!cur || strncmp(cur, "Noto", 4) != 0)
+            {
+                bool found = false;
+                for (int f = RG_FONT_BUILTIN_MAX; f < rg_font_get_combined_count(); f++)
+                {
+                    const char *name = rg_font_get_combined_name(f);
+                    if (name && strncmp(name, "Noto", 4) == 0)
+                    {
+                        rg_gui_set_font(f);
+                        RG_LOGI("Auto-switched to Korean font");
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                    RG_LOGW("Korean selected but no Noto font loaded; UI will show missing-glyph boxes");
+            }
         }
 
         return true;
@@ -190,7 +254,7 @@ bool rg_gui_set_theme(const char *theme_name)
         RG_LOGI("Using built-in theme!\n");
     }
 
-    gui.style.box_background = rg_gui_get_theme_color("dialog", "background", C_NAVY);
+    gui.style.box_background = rg_gui_get_theme_color("dialog", "background", C_BLACK);
     gui.style.box_header = rg_gui_get_theme_color("dialog", "header", C_WHITE);
     gui.style.box_border = rg_gui_get_theme_color("dialog", "border", C_DIM_GRAY);
     gui.style.item_standard = rg_gui_get_theme_color("dialog", "item_standard", C_WHITE);
@@ -535,6 +599,62 @@ void rg_gui_draw_rect(int x_pos, int y_pos, int width, int height, int border_si
     }
 }
 
+void rg_gui_draw_rounded_rect(int x_pos, int y_pos, int width, int height, int radius,
+                              rg_color_t fill_color)
+{
+    if (width <= 0 || height <= 0 || fill_color == C_NONE || fill_color == C_TRANSPARENT)
+        return;
+
+    x_pos = get_horizontal_position(x_pos, width);
+    y_pos = get_vertical_position(y_pos, height);
+
+    // Clip to the screen. This bounds width/height (and therefore radius and the
+    // r*r distance math below) to sane values for any caller, so the public API
+    // cannot overflow or draw off-screen.
+    if (x_pos < 0) { width += x_pos; x_pos = 0; }
+    if (y_pos < 0) { height += y_pos; y_pos = 0; }
+    width = RG_MIN(width, gui.screen_width - x_pos);
+    height = RG_MIN(height, gui.screen_height - y_pos);
+    if (width <= 0 || height <= 0)
+        return;
+
+    // Keep the radius sane: never larger than half the shorter side.
+    int max_radius = RG_MIN(width, height) / 2;
+    if (radius > max_radius)
+        radius = max_radius;
+    if (radius < 0)
+        radius = 0;
+
+    // Draw the bar as opaque horizontal spans, one per scanline near the corners
+    // and a single full-width block for the middle. This avoids C_TRANSPARENT
+    // masking entirely: rg_gui_copy_buffer only skips transparent pixels on the
+    // RAM-surface path, so a transparency-based rounded rect would render its
+    // corners as solid magenta on the direct-display path that dialogs use.
+    // Solid spans are correct on both paths.
+    int mid_h = height - radius * 2;
+    if (mid_h > 0)
+        rg_gui_draw_rect(x_pos, y_pos + radius, width, mid_h, 0, 0, fill_color);
+
+    if (radius == 0)
+        return; // the middle block already covered everything
+
+    int r = radius - 1;
+    int r2 = r * r;
+    for (int row = 0; row < radius; row++)
+    {
+        // Smallest horizontal inset at which the quarter circle includes the pixel.
+        int inset = 0;
+        while (inset < radius && (r - inset) * (r - inset) + (r - row) * (r - row) > r2)
+            inset++;
+        int span_w = width - inset * 2;
+        if (span_w > 0)
+        {
+            rg_gui_draw_rect(x_pos + inset, y_pos + row, span_w, 1, 0, 0, fill_color);
+            rg_gui_draw_rect(x_pos + inset, y_pos + height - 1 - row, span_w, 1, 0, 0, fill_color);
+        }
+    }
+}
+
 void rg_gui_draw_image(int x_pos, int y_pos, int width, int height, bool resample, const rg_image_t *img)
 {
     if (img && resample && (width && height) && (width != img->width || height != img->height))
@@ -785,14 +905,33 @@ void rg_gui_draw_dialog(const char *title, const rg_gui_option_t *options, int s
             color = gui.style.item_disabled;
 
         bool highlight = (options[i].flags & RG_DIALOG_FLAG_MODE_MASK) != RG_DIALOG_FLAG_SKIP && i == sel;
-        fg = highlight ? gui.style.box_background : color;
-        bg = highlight ? color : gui.style.box_background;
 
         if (y + row_height[i] >= box_y + box_height)
             break;
 
         if (options[i].flags == RG_DIALOG_FLAG_HIDDEN)
             continue;
+
+        // The highlighted row becomes a rounded bar in the item colour with the
+        // text drawn over it in the box colour -- the same inverted, rounded
+        // selection the launcher list uses, so the two surfaces read as one.
+        // Fill the row with the box colour first so the bar's transparent corners
+        // show the dialog background, not whatever was on screen behind the dialog.
+        int row_w = inner_width + row_padding_x * 2;
+        if (highlight)
+        {
+            rg_gui_draw_rect(x, y, row_w, row_height[i], 0, 0, gui.style.box_background);
+            if (color != C_TRANSPARENT)
+                rg_gui_draw_rounded_rect(x, y, row_w, row_height[i], RG_MAX(row_height[i] / 6, 2), color);
+        }
+
+        fg = highlight ? gui.style.box_background : color;
+        // The text background must be opaque (the bar colour), not transparent:
+        // rg_gui_copy_buffer only honours transparency on the RAM-surface path,
+        // so a transparent bg would render as magenta on the direct-display path
+        // dialogs use. The text is inset past the padding, so the opaque fill
+        // never reaches the bar's rounded corners.
+        bg = highlight ? color : gui.style.box_background;
 
         if (false && options[i].flags == RG_DIALOG_FLAG_SEPARATOR)
         {
@@ -803,7 +942,7 @@ void rg_gui_draw_dialog(const char *title, const rg_gui_option_t *options, int s
             rg_gui_draw_text(xx, yy, col1_width, options[i].label, fg, bg, 0);
             rg_gui_draw_text(xx + col1_width, yy, sep_width, ": ", fg, bg, 0);
             height = rg_gui_draw_text(xx + col1_width + sep_width, yy, col2_width, options[i].value, fg, bg, RG_TEXT_MULTILINE).height;
-            if ((height / font_height) >= 2) // Multiline value, must fill sep and label
+            if (!highlight && (height / font_height) >= 2) // Multiline value, must fill sep and label
                 rg_gui_draw_rect(xx, yy + font_height + 1, inner_width - col2_width, height - font_height, 0, 0, bg);
         }
         else
@@ -811,10 +950,15 @@ void rg_gui_draw_dialog(const char *title, const rg_gui_option_t *options, int s
             height = rg_gui_draw_text(xx, yy, inner_width, options[i].label, fg, bg, RG_TEXT_MULTILINE).height;
         }
 
-        rg_gui_draw_rect(x, yy, row_padding_x, height, 0, 0, bg);
-        rg_gui_draw_rect(xx + inner_width, yy, row_padding_x, height, 0, 0, bg);
-        rg_gui_draw_rect(x, y, inner_width + row_padding_x * 2, row_padding_y, 0, 0, bg);
-        rg_gui_draw_rect(x, yy + height, inner_width + row_padding_x * 2, row_padding_y, 0, 0, bg);
+        // The flat padding fill is only needed for unselected rows; the rounded
+        // bar already covers the highlighted row's padding.
+        if (!highlight)
+        {
+            rg_gui_draw_rect(x, yy, row_padding_x, height, 0, 0, bg);
+            rg_gui_draw_rect(xx + inner_width, yy, row_padding_x, height, 0, 0, bg);
+            rg_gui_draw_rect(x, y, row_w, row_padding_y, 0, 0, bg);
+            rg_gui_draw_rect(x, yy + height, row_w, row_padding_y, 0, 0, bg);
+        }
 
         y += height + row_padding_y * 2;
     }
@@ -1502,6 +1646,21 @@ static rg_gui_event_t filter_update_cb(rg_gui_option_t *option, rg_gui_event_t e
     return RG_DIALOG_VOID;
 }
 
+static rg_gui_event_t scanline_update_cb(rg_gui_option_t *option, rg_gui_event_t event)
+{
+    bool on = rg_display_get_scanline();
+
+    if (event == RG_DIALOG_PREV || event == RG_DIALOG_NEXT)
+    {
+        rg_display_set_scanline(!on);
+        on = rg_display_get_scanline();
+        return RG_DIALOG_REDRAW;
+    }
+
+    strcpy(option->value, on ? _("On") : _("Off"));
+    return RG_DIALOG_VOID;
+}
+
 static rg_gui_event_t scaling_update_cb(rg_gui_option_t *option, rg_gui_event_t event)
 {
     int max = RG_DISPLAY_SCALING_COUNT - 1;
@@ -1527,6 +1686,10 @@ static rg_gui_event_t scaling_update_cb(rg_gui_option_t *option, rg_gui_event_t 
         strcpy(option->value, _("Full"));
     else if (mode == RG_DISPLAY_SCALING_ZOOM)
         strcpy(option->value, _("Zoom"));
+    else if (mode == RG_DISPLAY_SCALING_INT)
+        strcpy(option->value, _("Pixel-perfect"));
+    else if (mode == RG_DISPLAY_SCALING_4_3)
+        strcpy(option->value, _("4:3"));
 
     return RG_DIALOG_VOID;
 }
@@ -2056,6 +2219,7 @@ void rg_gui_options_menu(void)
         {0, _("Scaling"),       "-", RG_DIALOG_FLAG_NORMAL, &scaling_update_cb},
         {0, _("Factor"),        "-", RG_DIALOG_FLAG_HIDDEN, &custom_zoom_cb},
         {0, _("Filter"),        "-", RG_DIALOG_FLAG_NORMAL, &filter_update_cb},
+        {0, _("CRT Effect"),    "-", RG_DIALOG_FLAG_NORMAL, &scanline_update_cb},
         {0, _("Border"),        "-", RG_DIALOG_FLAG_NORMAL, &border_update_cb},
         {0, _("Speed"),         "-", RG_DIALOG_FLAG_NORMAL, &speedup_update_cb},
         {0, _("Auto-save"),     "-", RG_DIALOG_FLAG_NORMAL, &autosave_update_cb},
@@ -2243,7 +2407,10 @@ static rg_gui_event_t slot_select_cb(rg_gui_option_t *option, rg_gui_event_t eve
     if (event == RG_DIALOG_FOCUS_GAINED)
     {
         rg_image_t *preview = NULL;
-        rg_color_t color = C_BLUE;
+        // Slot-state border uses theme tones so the savestate screen matches the
+        // dark-minimal menu instead of bright blue/red. Used = selection colour,
+        // empty = disabled colour.
+        rg_color_t color = gui.style.scrollbar;
         size_t margin = 0; // TEXT_RECT("ABC", 0).height;
         size_t border = 3;
         char buffer[100];
@@ -2258,12 +2425,18 @@ static rg_gui_event_t slot_select_cb(rg_gui_option_t *option, rg_gui_event_t eve
         else
         {
             snprintf(buffer, sizeof(buffer), "Slot %d is empty", slot->id);
-            color = C_RED;
+            color = gui.style.item_disabled;
         }
-        rg_gui_draw_image(0, margin, gui.screen_width, gui.screen_height - margin * 2, true, preview);
+        // Draw the preview, or a plain theme-coloured fill when there is none.
+        // Falling through to rg_gui_draw_image(NULL) would paint a full-screen
+        // red "missing image" box, which clashes with the dark-minimal menu.
+        if (preview)
+            rg_gui_draw_image(0, margin, gui.screen_width, gui.screen_height - margin * 2, true, preview);
+        else
+            rg_gui_draw_rect(0, margin, gui.screen_width, gui.screen_height - margin * 2, 0, 0, gui.style.box_background);
         rg_gui_draw_rect(0, margin, gui.screen_width, gui.screen_height - margin * 2, border, color, C_NONE);
-        rg_gui_draw_rect(border, margin + border, gui.screen_width - border * 2, gui.font_height * 2 + 6, 0, C_BLACK, C_BLACK);
-        rg_gui_draw_text(border + 60, margin + border + 5, gui.screen_width - border * 2 - 120, buffer, C_WHITE, C_BLACK, RG_TEXT_ALIGN_CENTER|RG_TEXT_BIGGER|RG_TEXT_NO_PADDING);
+        rg_gui_draw_rect(border, margin + border, gui.screen_width - border * 2, gui.font_height * 2 + 6, 0, 0, gui.style.box_background);
+        rg_gui_draw_text(border + 60, margin + border + 5, gui.screen_width - border * 2 - 120, buffer, gui.style.box_header, gui.style.box_background, RG_TEXT_ALIGN_CENTER|RG_TEXT_BIGGER|RG_TEXT_NO_PADDING);
         rg_surface_free(preview);
     }
     else if (event == RG_DIALOG_ENTER)
@@ -2271,7 +2444,6 @@ static rg_gui_event_t slot_select_cb(rg_gui_option_t *option, rg_gui_event_t eve
         return RG_DIALOG_SELECT;
     }
     return RG_DIALOG_VOID;
-    #undef draw_status
 }
 
 int rg_gui_savestate_menu(const char *title, const char *rom_path)

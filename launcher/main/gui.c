@@ -5,8 +5,15 @@
 #include "applications.h"
 #include "gui.h"
 
-#define HEADER_HEIGHT       (50)
-#define LOGO_WIDTH          (46)
+// Layout scales with the display so it looks right on both 320x240 and 800x480.
+// The base values target 240px height (the original ST7789 target); every other
+// resolution grows proportionally from there.
+#define HEADER_HEIGHT       (gui.height * 50 / 240)
+#define LOGO_WIDTH          (gui.height * 46 / 240)
+// Extra gap between list rows for the open, breathable layout the Analogue OS
+// menu uses. Only applies above the 240px panel the original layout was tuned
+// for, so existing 320x240 targets keep their original list density.
+#define LINE_GAP            (RG_MAX((gui.height - 240) / 24, 0))
 #define PREVIEW_HEIGHT      ((int)(gui.height * 0.70f))
 #define PREVIEW_WIDTH       ((int)(gui.width * 0.50f))
 
@@ -25,7 +32,8 @@ static int max_visible_lines(const tab_t *tab, int *_line_height)
 {
     int line_height = TEXT_RECT("ABC123", 0).height;
     if (_line_height) *_line_height = line_height;
-    return (gui.height - (HEADER_HEIGHT + 6) - (tab->navpath ? line_height : 0)) / line_height;
+    int row = RG_MAX(line_height + LINE_GAP, 1);
+    return RG_MAX((gui.height - (HEADER_HEIGHT + 6) - (tab->navpath ? line_height : 0)) / row, 1);
 }
 
 void gui_init(bool cold_boot)
@@ -198,12 +206,15 @@ void gui_set_status(tab_t *tab, const char *left, const char *right)
 void gui_update_theme(void)
 {
     // Load our four color schemes from gui theme
+    // Variant 0 is the Analogue OS-inspired dark-minimal scheme: pure black
+    // background, near-white unselected text, and an inverted (white bar / black
+    // text) selection row. See themes/default/theme.json.
     gui.themes[0].background = rg_gui_get_theme_color("launcher_1", "background", C_BLACK);
-    gui.themes[0].foreground = rg_gui_get_theme_color("launcher_1", "foreground", C_SNOW);
+    gui.themes[0].foreground = rg_gui_get_theme_color("launcher_1", "foreground", C_WHITE);
     gui.themes[0].list.standard_bg = rg_gui_get_theme_color("launcher_1", "list_standard_bg", C_TRANSPARENT);
-    gui.themes[0].list.standard_fg = rg_gui_get_theme_color("launcher_1", "list_standard_fg", C_GRAY);
-    gui.themes[0].list.selected_bg = rg_gui_get_theme_color("launcher_1", "list_selected_bg", C_TRANSPARENT);
-    gui.themes[0].list.selected_fg = rg_gui_get_theme_color("launcher_1", "list_selected_fg", C_WHITE);
+    gui.themes[0].list.standard_fg = rg_gui_get_theme_color("launcher_1", "list_standard_fg", C_WHITE);
+    gui.themes[0].list.selected_bg = rg_gui_get_theme_color("launcher_1", "list_selected_bg", C_WHITE);
+    gui.themes[0].list.selected_fg = rg_gui_get_theme_color("launcher_1", "list_selected_fg", C_BLACK);
 
     gui.themes[1].background = rg_gui_get_theme_color("launcher_2", "background", C_BLACK);
     gui.themes[1].foreground = rg_gui_get_theme_color("launcher_2", "foreground", C_SNOW);
@@ -231,6 +242,7 @@ void gui_update_theme(void)
     {
         tab_t *tab = gui.tabs[i];
         rg_surface_free(tab->background), tab->background = NULL;
+        tab->background_suppressed = false; // a theme change re-evaluates backgrounds
         rg_surface_free(tab->banner), tab->banner = NULL;
         rg_surface_free(tab->logo), tab->logo = NULL;
     }
@@ -418,12 +430,22 @@ void gui_draw_background(tab_t *tab, int shade)
         tab->background = NULL;
     }
 
-    if (!tab->background)
+    if (!tab->background && !tab->background_suppressed)
     {
         tab->background = gui_get_image("background", tab->name); // Try background_<tabname>.png
         if (!tab->background)
             tab->background = gui_get_image("background", NULL); // Fallback to a background.png
         tab->background_shade = 0;
+        // The bundled backgrounds were drawn for 320x240. On a larger panel they
+        // upscale into a soft, muddy wash that fights the minimal aesthetic, so
+        // drop them in favour of the solid theme colour unless they are close to
+        // the native resolution. A high-res theme can still supply its own art.
+        if (tab->background && tab->background->width < gui.width * 3 / 4)
+        {
+            rg_surface_free(tab->background);
+            tab->background = NULL;
+            tab->background_suppressed = true; // do not re-decode this every redraw
+        }
         if (tab->background && (tab->background->width != gui.width || tab->background->height != gui.height))
         {
             rg_image_t *temp = rg_surface_resize(tab->background, gui.width, gui.height);
@@ -466,11 +488,26 @@ void gui_draw_header(tab_t *tab, int offset)
     if (!tab->logo)
         tab->logo = gui_get_image("logo", tab->name);
 
-    rg_gui_draw_image(0, offset, LOGO_WIDTH, HEADER_HEIGHT, false, tab->logo);
-    if (tab->banner)
-        rg_gui_draw_image(LOGO_WIDTH + 1, offset + 8, 0, HEADER_HEIGHT - 8, false, tab->banner);
+    // The bundled logos/banners were drawn for 320x240. On a larger panel they
+    // upscale soft, which fights the minimal aesthetic, so when the art is too
+    // low-res we fall back to a clean text system name -- the Analogue OS approach.
+    bool hires_art = tab->logo && tab->logo->width >= LOGO_WIDTH * 3 / 4;
+
+    if (hires_art)
+    {
+        rg_gui_draw_image(0, offset, LOGO_WIDTH, HEADER_HEIGHT, false, tab->logo);
+        if (tab->banner)
+            rg_gui_draw_image(LOGO_WIDTH + 1, offset + 8, 0, HEADER_HEIGHT - 8, false, tab->banner);
+        else
+            rg_gui_draw_text(LOGO_WIDTH + 8, offset + 8, 0, tab->desc, gui.theme->foreground, C_TRANSPARENT, RG_TEXT_BIGGER);
+    }
     else
-        rg_gui_draw_text(LOGO_WIDTH + 8, offset + 8, 0, tab->desc, gui.theme->foreground, C_TRANSPARENT, RG_TEXT_BIGGER);
+    {
+        // Minimal text header: system name inset to line up with the list gutter.
+        int x = gui.width / 24;
+        rg_gui_draw_text(x, offset + HEADER_HEIGHT / 4, 0, tab->desc,
+                         gui.theme->foreground, C_TRANSPARENT, RG_TEXT_BIGGER);
+    }
 }
 
 void gui_draw_tab_indicator(void)
@@ -480,7 +517,7 @@ void gui_draw_tab_indicator(void)
     rg_gui_draw_text(RG_GUI_CENTER, RG_GUI_BOTTOM, 0, buffer, C_DIM_GRAY, C_TRANSPARENT, RG_TEXT_BIGGER|RG_TEXT_MONOSPACE);
     memset(buffer, ' ', gui.tabs_count);
     buffer[gui.selected_tab] = '-';
-    rg_gui_draw_text(RG_GUI_CENTER, RG_GUI_BOTTOM, 0, buffer, C_SNOW, C_TRANSPARENT, RG_TEXT_BIGGER|RG_TEXT_MONOSPACE);
+    rg_gui_draw_text(RG_GUI_CENTER, RG_GUI_BOTTOM, 0, buffer, gui.theme->foreground, C_TRANSPARENT, RG_TEXT_BIGGER|RG_TEXT_MONOSPACE);
 }
 
 void gui_draw_status(tab_t *tab)
@@ -505,14 +542,27 @@ void gui_draw_list(tab_t *tab)
     int lines = max_visible_lines(tab, &line_height);
     int line_offset = 0;
 
+    // The list sits inside horizontal margins so the selection bar can breathe
+    // away from the screen edges, the way the Analogue OS menu insets its rows.
+    int list_x = gui.width / 24;          // ~4% gutter each side
+    int list_w = gui.width - list_x * 2;
+    // Reserve the right half for the cover whenever preview mode is on and the
+    // preview can actually be loaded, even before the current item's art arrives,
+    // so the list width does not jump when it does. In low-memory mode previews
+    // are never loaded, so keep the full width there.
+    if (!gui.low_memory_mode && gui.show_preview != PREVIEW_MODE_NONE)
+        list_w = gui.width / 2 - list_x;
+    int bar_pad = RG_MAX(list_w / 40, 4); // inner padding of the selection bar
+    int radius = RG_MAX(line_height / 4, 2);
+
     if (tab->navpath)
     {
         char buffer[64];
         snprintf(buffer, 63, "[%s]",  tab->navpath);
-        top += rg_gui_draw_text(0, top, gui.width, buffer, gui.theme->foreground, C_TRANSPARENT, 0).height;
+        top += rg_gui_draw_text(list_x, top, list_w, buffer, gui.theme->foreground, C_TRANSPARENT, 0).height;
     }
 
-    top += ((gui.height - top) - (lines * line_height)) / 2;
+    top += ((gui.height - top) - (lines * (line_height + LINE_GAP))) / 2;
 
     if (gui.scroll_mode == SCROLL_MODE_PAGING)
     {
@@ -528,7 +578,14 @@ void gui_draw_list(tab_t *tab)
         int idx = line_offset + i;
         int selected = idx == list->cursor;
         char *label = (idx >= 0 && idx < list->length) ? list->items[idx].text : "";
-        top += rg_gui_draw_text(0, top, gui.width, label, fg[selected], bg[selected], 0).height;
+
+        // Draw the selection bar first, then the text on top with a transparent
+        // background so the rounded bar shows through around the glyphs.
+        if (selected && bg[selected] != C_TRANSPARENT)
+            rg_gui_draw_rounded_rect(list_x, top, list_w, line_height, radius, bg[selected]);
+
+        rg_gui_draw_text(list_x + bar_pad, top, list_w - bar_pad * 2, label, fg[selected], C_TRANSPARENT, 0);
+        top += line_height + LINE_GAP;
     }
 }
 

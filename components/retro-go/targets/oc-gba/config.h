@@ -213,3 +213,7 @@
 // Korean translation and a Hangul font exist.
 #define RG_LANG_DEFAULT             RG_LANG_EN
 #define RG_FONT_DEFAULT             RG_FONT_DEJAVU_15
+// The 800x480 panel makes the 15px built-in uncomfortable to read, so prefer the 24px
+// DejaVu face compiled in as an external font. Only takes effect until the user picks a
+// font of their own (see rg_gui_init).
+#define RG_FONT_DEFAULT_NAME        "DejaVu 24"

@@ -549,6 +549,21 @@ static const char *translations[][RG_LANG_MAX] =
         [RG_LANG_KO] = "필터",
     },
     {
+        [RG_LANG_EN] = "CRT Effect",
+        [RG_LANG_ZH] = "CRT 扫描线",
+        [RG_LANG_KO] = "CRT 스캔라인",
+    },
+    {
+        [RG_LANG_EN] = "Pixel-perfect",
+        [RG_LANG_ZH] = "像素完美",
+        [RG_LANG_KO] = "픽셀 퍼펙트",
+    },
+    {
+        [RG_LANG_EN] = "4:3",
+        [RG_LANG_ZH] = "4:3",
+        [RG_LANG_KO] = "4:3",
+    },
+    {
         [RG_LANG_EN] = "Border",
         [RG_LANG_ZH] = "边框",
         [RG_LANG_KO] = "테두리",
