@@ -71,10 +71,9 @@ static void publish_code(void *addr, size_t size)
     if (err != ESP_OK)
         note("  esp_cache_msync(data writeback) returned 0x%x", err);
 
-    err = esp_cache_msync(addr, size, ESP_CACHE_MSYNC_FLAG_INVALIDATE | ESP_CACHE_MSYNC_FLAG_TYPE_INST);
-    if (err != ESP_OK)
-        note("  esp_cache_msync(instruction invalidate) returned 0x%x", err);
-
+    // No instruction-cache msync here: this chip rejects it with
+    // "C2M direction doesn't support instruction type" (0x102). fence.i is the RISC-V way to
+    // say the same thing and is what actually makes the stores visible to instruction fetch.
     asm volatile("fence.i" ::: "memory");
 }
 
@@ -164,6 +163,14 @@ void rg_psram_exec_test(void)
 
     // 4. Internal RAM, same block, for the ratio that actually decides the design.
     void *iram_code = heap_caps_aligned_alloc(ALIGN_TO, warm_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_EXEC);
+    if (!iram_code)
+    {
+        // Same story as PSRAM above: the heap declines to call internal memory executable, and
+        // the hardware disagrees. Ask again without the flag rather than skipping the
+        // comparison, because the ratio between these two numbers is the whole point.
+        iram_code = heap_caps_aligned_alloc(ALIGN_TO, warm_size, MALLOC_CAP_INTERNAL);
+        note("internal alloc without MALLOC_CAP_EXEC: %s", iram_code ? "ok" : "NULL");
+    }
     if (iram_code)
     {
         describe("internal block", iram_code);

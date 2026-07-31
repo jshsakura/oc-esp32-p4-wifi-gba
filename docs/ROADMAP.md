@@ -86,8 +86,27 @@ u16 palette_ram[512], oam_ram[512];  // 2KB
 
 ### 이 절이 걸린 미해결 질문
 
-**Q1. P4에서 PSRAM 영역의 명령어 인출이 가능한가?**
-가능하면 "뜨거운 블록 IRAM / 식은 블록 PSRAM" 하이브리드가 열리고, 불가능하면 코드캐시 전체가 IRAM 예산 안에 들어와야 한다. **이 답 하나로 설계가 갈린다. 최우선 확인 대상.**
+**Q1. P4에서 PSRAM 영역의 명령어 인출이 가능한가? → 2026-07-31 실기 측정. 답은 "된다", 단 예상과 반대의 함정이 있다.**
+
+| 대상 | 결과 |
+|---|---|
+| PSRAM, 캐시 상주 | **346 MIPS** — 360MHz에서 사실상 전속력 |
+| PSRAM, 스트리밍(1MB를 블록마다 한 번씩) | **8 MIPS** — 캐시를 벗어나면 **43배** 느려짐 |
+| 일반 힙의 내부 RAM (`MALLOC_CAP_INTERNAL`) | **Instruction access fault** |
+
+세 가지가 따라 나온다:
+
+1. **힙은 실행 가능 메모리를 주지 않는다.** `MALLOC_CAP_EXEC`는 PSRAM에서도 내부에서도 NULL이다.
+   PSRAM은 플래그 없이 잡아도 실행됐다.
+2. **거꾸로다.** PSRAM은 실행되고 **내부 RAM이 폴트난다** — 메모리 보호가 DRAM에 실행 권한을 주지
+   않기 때문이다(`CONFIG_SPIRAM_PRE_CONFIGURE_MEMORY_PROTECTION`, `targets/oc-gba/sdkconfig:203`).
+   `esp_ptr_executable()`은 양쪽 다 1이라고 답하므로 믿으면 안 된다. **"뜨거운 블록은 IRAM"은
+   그냥 되는 게 아니라, 실행 가능한 내부 영역을 따로 확보하는 작업이 선행돼야 한다.**
+3. **설계를 가르는 숫자는 43배다.** 코드캐시를 PSRAM에 두는 것 자체는 가능하지만, L2 128KB 안에
+   머무는 블록만 전속력이다. 즉 캐시 크기가 곧 성능이고, 코드캐시는 L2에 맞춰 설계하고 PSRAM은
+   넘칠 때의 저장소로 보는 것이 맞다.
+
+프로브: `components/retro-go/rg_psram_exec_test.c`, 절차는 [BRINGUP.md A1](BRINGUP.md).
 
 **Q2. SMC 추적 배열 288KB를 줄일 수 있는가?**
 성공하면 EWRAM을 내부로 올릴 여유가 생긴다.
@@ -348,9 +367,8 @@ return false;  /* ❌ 条件分支导致ROM卡死 */  (조건 분기가 ROM을 �
 
 ## 부록 D. 다음에 확인할 것
 
-- [ ] **Q1: P4에서 PSRAM 영역 명령어 인출 가부** — Phase 2b. **최우선.**
-      프로브 작성됨(`components/retro-go/rg_psram_exec_test.c`). SD에 `/retro-go/psram_exec_test`를
-      두고 부팅하면 실행된다 — 절차와 판독법은 [BRINGUP.md A1](BRINGUP.md). 패널도 버튼도 필요 없다
+- [x] **Q1: P4에서 PSRAM 영역 명령어 인출 가부** — 2026-07-31 답 나옴. 된다(캐시 상주 346 MIPS,
+      스트리밍 8 MIPS). 다만 **내부 RAM 쪽이 폴트난다.** 3절 참조
 - [ ] Q2: SMC 추적 배열 288KB 축소 가능성 — Phase 2e
 - [ ] Q3: 코드 생성 후 캐시 유지보수 절차 (`fence.i` + L2 라이트백) — Phase 2d
 - [ ] `gbsp` 인터프리터 실측 fps (기준선) — Phase 2a, 실기 필요

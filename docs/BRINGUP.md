@@ -59,7 +59,37 @@ JSON**(`rg_system.c:129` `update_boot_config`, `rg_settings.c:38`). 둘 다 PC�
 
 런처로 돌아오려면 `switch_ota_partition --name launcher`.
 
-### 0.3 로그 읽기
+### 0.3 카드를 빼지 않고 카드에 파일 넣기
+
+앞의 두 방법으로도 남는 마지막 물리적 제약이 "카트를 넣으려면 SD를 빼야 한다"인데, 이것도 우회된다.
+**펌웨어는 `/sd`를 쓰기 가능하게 마운트하고 있다.** 그러니 파일을 바이너리에 실어 보내고 부팅 때
+떨어뜨리면 된다:
+
+```cmake
+# <app>/main/CMakeLists.txt
+set(COMPONENT_EMBED_FILES "celeste.p8.png")
+```
+
+```c
+extern const uint8_t start[] asm("_binary_celeste_p8_png_start");
+extern const uint8_t end[]   asm("_binary_celeste_p8_png_end");
+if (!rg_storage_exists(path)) {
+    rg_storage_mkdir(RG_BASE_PATH_ROMS "/p8");
+    rg_storage_write_file(path, start, end - start, 0);
+}
+```
+
+2026-07-31에 셀레스테를 이렇게 넣어 실측했다. 카드가 리더에 갈 때까지 기다리지 않아도 되지만,
+**남의 카트를 펌웨어 이미지에 넣은 채로 커밋하면 안 된다** — 벤치 위에서는 괜찮고 저장소에서는
+아니다. 넣고, 재고, 지울 것.
+
+**⚠️ 앱이 커지면 파티션을 넘긴다.** 카트 35KB를 넣었더니 `fake08.bin`이 파티션보다 커졌는데,
+`rg_tool.py build <app>`의 크기 검사는 더미 3MB 테이블로 하기 때문에 **통과한다.** 부트로더가
+그 이미지를 거부하고 **다른 앱으로 조용히 떨어졌고**, 그게 왜 gbsp가 뜨는지 한참 헤맸다.
+파티션 크기는 `build-img`가 실제 바이너리 크기에서 계산하므로, **앱 하나만 굽지 말고 이미지를 다시
+말아서 통째로 구울 것.**
+
+### 0.4 로그 읽기
 
 ```sh
 python3 rg_tool.py --target oc-gba-devkit --port /dev/ttyACM0 monitor
@@ -107,6 +137,10 @@ touch /media/…/retro-go/psram_exec_test     # SD를 PC에 꽂아서
 
 > **죽는 쪽도 정상적인 결과다.** 폴트는 패닉이고 `/sd/crash.log`가 남는다. 프로브는 호출 **전에**
 > 마커 파일을 지우므로 다음 부팅에 다시 죽지 않는다 — 답이 브릭이 되면 안 되니까.
+
+**2026-07-31 실행됨. 답은 [ROADMAP 3절 Q1](ROADMAP.md)에 기록했다** — 요약하면 PSRAM은 실행되고
+(캐시 상주 346 MIPS, 스트리밍 8 MIPS로 43배 차이), 일반 힙의 내부 RAM은 실행이 **폴트난다**.
+`esp_ptr_executable()`은 양쪽 다 1이라고 답하니 믿으면 안 된다.
 
 관련 설정은 `targets/oc-gba/sdkconfig:203`
 (`CONFIG_SPIRAM_PRE_CONFIGURE_MEMORY_PROTECTION=y`).
