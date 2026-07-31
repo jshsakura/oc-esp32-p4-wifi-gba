@@ -557,6 +557,11 @@ static const char *translations[][RG_LANG_MAX] =
         [RG_LANG_KO] = "/screenshot.png 에 저장됨",
     },
     {
+        [RG_LANG_EN] = "Sleep",
+        [RG_LANG_ZH] = "休眠",
+        [RG_LANG_KO] = "절전",
+    },
+    {
         [RG_LANG_EN] = "Font type",
         [RG_LANG_ZH] = "字体类型",
         [RG_LANG_KO] = "글꼴 종류",

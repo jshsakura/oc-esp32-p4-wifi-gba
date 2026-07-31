@@ -2717,6 +2717,7 @@ void rg_gui_game_menu(void)
         {3001, _("Load game"),       NULL, RG_DIALOG_FLAG_NORMAL, NULL},
         {3000, _("Reset"),           NULL, RG_DIALOG_FLAG_NORMAL, NULL},
         {4000, _("Screenshot"),      NULL, RG_DIALOG_FLAG_NORMAL, NULL},
+        {8000, _("Sleep"),           NULL, RG_DIALOG_FLAG_NORMAL, NULL},
         #ifdef RG_ENABLE_NETPLAY
         {5000, _("Netplay"),         NULL, RG_DIALOG_FLAG_NORMAL, NULL},
         #endif
@@ -2750,6 +2751,13 @@ void rg_gui_game_menu(void)
         case 3003: rg_emu_reset(true); break;
         case 4000: rg_emu_screenshot(RG_STORAGE_ROOT "/screenshot.png", 0, 0);
                    rg_gui_alert(_("Screenshot"), _("Saved to /screenshot.png")); break;
+        case 8000: // Save the current state so the next boot resumes here, then
+                   // enter deep sleep (lowest power). On oc-gba the I2C buttons
+                   // cannot wake deep sleep, so this is effectively power-off-
+                   // with-resume: power cycle the device and it boots back here.
+                   rg_emu_save_state(0);
+                   rg_system_sleep();
+                   break;
     #ifdef RG_ENABLE_NETPLAY
         case 5000: rg_netplay_quick_start(); break;
     #endif
