@@ -125,6 +125,9 @@ void rg_display_set_rotation(display_rotation_t rotation);
 display_rotation_t rg_display_get_rotation(void);
 void rg_display_set_backlight(display_backlight_t percent);
 display_backlight_t rg_display_get_backlight(void);
+// Set the hardware backlight without persisting to settings -- used for the
+// transient idle dim, so the user's chosen brightness is not overwritten.
+void rg_display_dim_backlight(int percent);
 void rg_display_set_border(const char *filename);
 char *rg_display_get_border(void);
 void rg_display_set_custom_zoom(double factor);

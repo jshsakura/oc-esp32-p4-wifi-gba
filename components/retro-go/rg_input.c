@@ -44,6 +44,10 @@ static rg_battery_t battery_state = {0};
 // never stops the MENU/OPTION chords from firing.
 static uint32_t key_remap[RG_KEY_COUNT];
 static void load_key_remap(void);
+// Idle backlight dimming state.
+static int64_t idle_last_input = 0;
+static bool idle_dimmed = false;
+static int idle_saved_backlight = 0;
 
 #define UPDATE_GLOBAL_MAP(keymap)                 \
     for (size_t i = 0; i < RG_COUNT(keymap); ++i) \
@@ -302,6 +306,27 @@ static void input_task(void *arg)
             }
             gamepad_state = local_gamepad_state;
             __sync_synchronize();
+
+            // Idle backlight dimming: after ~30s of no input, drop the backlight
+            // to a fraction of the user's level to save power; any key restores it.
+            // The dim is transient (rg_display_dim_backlight does not save), so the
+            // user's brightness setting is untouched.
+            int64_t now = rg_system_timer();
+            if (local_gamepad_state != 0)
+            {
+                idle_last_input = now;
+                if (idle_dimmed)
+                {
+                    rg_display_dim_backlight(idle_saved_backlight);
+                    idle_dimmed = false;
+                }
+            }
+            else if (!idle_dimmed && idle_last_input && (now - idle_last_input) > 30 * 1000000)
+            {
+                idle_saved_backlight = rg_display_get_backlight();
+                rg_display_dim_backlight(RG_MAX(idle_saved_backlight / 5, 5));
+                idle_dimmed = true;
+            }
         }
 
         if (rg_system_timer() >= next_battery_update)

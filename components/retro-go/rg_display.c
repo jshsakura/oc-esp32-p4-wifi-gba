@@ -516,6 +516,12 @@ display_backlight_t rg_display_get_backlight(void)
     return config.backlight;
 }
 
+void rg_display_dim_backlight(int percent)
+{
+    int dim = RG_MIN(RG_MAX(percent, RG_DISPLAY_BACKLIGHT_MIN), RG_DISPLAY_BACKLIGHT_MAX);
+    lcd_set_backlight(dim);
+}
+
 void rg_display_set_border(const char *filename)
 {
     free(config.border_file);
