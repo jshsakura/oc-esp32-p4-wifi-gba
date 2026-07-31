@@ -595,6 +595,7 @@ void application_show_file_menu(retro_file_t *file, bool advanced)
         {2, _("Delete save"), NULL, has_save || has_sram, NULL},
         RG_DIALOG_SEPARATOR,
         {4, _("Properties"), NULL, 1, NULL},
+        {5, _("Delete ROM"), NULL, 1, NULL},
         RG_DIALOG_END,
     };
 
@@ -633,6 +634,25 @@ void application_show_file_menu(retro_file_t *file, bool advanced)
 
     case 4:
         show_file_info(file);
+        break;
+
+    case 5:
+        if (rg_gui_confirm(_("Delete ROM?"), _("Also deletes saves and covers."), 0))
+        {
+            // Remove the ROM and all its associated files.
+            remove(rom_path);
+            if (has_sram)
+                remove(sram_path);
+            for (int s = 0; s < 4; s++)
+            {
+                remove(savestates->slots[s].file);
+                remove(savestates->slots[s].preview);
+            }
+            bookmark_remove(BOOK_TYPE_RECENT, file);
+            bookmark_remove(BOOK_TYPE_FAVORITE, file);
+            // Force the list to rebuild so the deleted entry disappears.
+            gui_invalidate();
+        }
         break;
 
     default:

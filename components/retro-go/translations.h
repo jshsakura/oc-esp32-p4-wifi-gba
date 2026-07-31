@@ -562,6 +562,21 @@ static const char *translations[][RG_LANG_MAX] =
         [RG_LANG_KO] = "절전",
     },
     {
+        [RG_LANG_EN] = "Delete ROM",
+        [RG_LANG_ZH] = "删除 ROM",
+        [RG_LANG_KO] = "ROM 삭제",
+    },
+    {
+        [RG_LANG_EN] = "Delete ROM?",
+        [RG_LANG_ZH] = "删除 ROM？",
+        [RG_LANG_KO] = "ROM을 삭제하시겠습니까?",
+    },
+    {
+        [RG_LANG_EN] = "Also deletes saves and covers.",
+        [RG_LANG_ZH] = "存档和封面也会被删除。",
+        [RG_LANG_KO] = "세이브와 커버도 함께 삭제됩니다.",
+    },
+    {
         [RG_LANG_EN] = "Font type",
         [RG_LANG_ZH] = "字体类型",
         [RG_LANG_KO] = "글꼴 종류",
