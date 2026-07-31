@@ -559,9 +559,9 @@ static const char *translations[][RG_LANG_MAX] =
         [RG_LANG_KO] = "픽셀 퍼펙트",
     },
     {
-        [RG_LANG_EN] = "4:3",
-        [RG_LANG_ZH] = "4:3",
-        [RG_LANG_KO] = "4:3",
+        [RG_LANG_EN] = "4:3 (CRT)",
+        [RG_LANG_ZH] = "4:3 (CRT)",
+        [RG_LANG_KO] = "4:3 (CRT)",
     },
     {
         [RG_LANG_EN] = "Border",

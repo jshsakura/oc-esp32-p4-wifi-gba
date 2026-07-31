@@ -1661,16 +1661,41 @@ static rg_gui_event_t scanline_update_cb(rg_gui_option_t *option, rg_gui_event_t
     return RG_DIALOG_VOID;
 }
 
+// 4:3 CRT-aspect correction is only right for systems whose square pixels were
+// displayed at 4:3 (NES/SNES/PCE/etc. in retro-core). The GBA is natively 3:2,
+// so offering 4:3 there just squashes the picture ~11% -- hide it for gbsp.
+static bool scaling_supported(int mode)
+{
+    if (mode == RG_DISPLAY_SCALING_4_3)
+    {
+        const rg_app_t *app = rg_system_get_app();
+        if (app && app->name && strcmp(app->name, "gbsp") == 0)
+            return false;
+    }
+    return true;
+}
+
 static rg_gui_event_t scaling_update_cb(rg_gui_option_t *option, rg_gui_event_t event)
 {
     int max = RG_DISPLAY_SCALING_COUNT - 1;
     int mode = rg_display_get_scaling();
     int prev_mode = mode;
 
-    if (event == RG_DIALOG_PREV && --mode < 0)
-        mode = max; // 0;
-    if (event == RG_DIALOG_NEXT && ++mode > max)
-        mode = 0; // max;
+    if (event == RG_DIALOG_PREV || event == RG_DIALOG_NEXT)
+    {
+        // Step through modes, skipping any this app does not support.
+        int step = (event == RG_DIALOG_NEXT) ? 1 : -1;
+        for (int i = 0; i < RG_DISPLAY_SCALING_COUNT; i++)
+        {
+            mode += step;
+            if (mode < 0)
+                mode = max;
+            if (mode > max)
+                mode = 0;
+            if (scaling_supported(mode))
+                break;
+        }
+    }
 
     if (mode != prev_mode)
     {
@@ -1689,7 +1714,7 @@ static rg_gui_event_t scaling_update_cb(rg_gui_option_t *option, rg_gui_event_t 
     else if (mode == RG_DISPLAY_SCALING_INT)
         strcpy(option->value, _("Pixel-perfect"));
     else if (mode == RG_DISPLAY_SCALING_4_3)
-        strcpy(option->value, _("4:3"));
+        strcpy(option->value, _("4:3 (CRT)"));
 
     return RG_DIALOG_VOID;
 }

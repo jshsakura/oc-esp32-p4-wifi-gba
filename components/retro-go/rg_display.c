@@ -209,7 +209,8 @@ static inline void write_update(const rg_surface_t *update)
         // CRT scanline effect: halve the brightness of every other physical
         // output line. line_buffer holds big-endian 565, so the byte swap and
         // 0xF7DE mask mirror blend_pixels. Only odd rows are touched, so the
-        // cost is half a frame's worth of pixel ops -- trivial on the P4.
+        // cost is about half a frame's worth of pixel ops (~5ms on a 720x480
+        // viewport at 360MHz) -- noticeable but acceptable on the display core.
         if (config.scanline && need_update)
         {
             int batch_top = y - lines_to_copy;

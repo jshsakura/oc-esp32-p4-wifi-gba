@@ -413,12 +413,18 @@ void gui_redraw(void)
 
 void gui_draw_preview(tab_t *tab)
 {
-    if (tab->preview)
-    {
-        int height = RG_MIN(tab->preview->height, PREVIEW_HEIGHT);
-        int width = RG_MIN(tab->preview->width, PREVIEW_WIDTH);
-        rg_gui_draw_image(-width, -height, width, height, true, tab->preview);
-    }
+    if (!tab->preview)
+        return;
+
+    // Fit the cover art inside the preview box preserving its aspect ratio,
+    // rather than stretching it to fill the box. Portrait box art (the common
+    // case) would otherwise be squashed wide. The letterbox fills with the
+    // theme background, which on the dark-minimal theme is black.
+    float scale = RG_MIN((float)PREVIEW_WIDTH / tab->preview->width,
+                         (float)PREVIEW_HEIGHT / tab->preview->height);
+    int width = (int)(tab->preview->width * scale);
+    int height = (int)(tab->preview->height * scale);
+    rg_gui_draw_image(-width, -height, width, height, true, tab->preview);
 }
 
 void gui_draw_background(tab_t *tab, int shade)
@@ -504,9 +510,12 @@ void gui_draw_header(tab_t *tab, int offset)
     else
     {
         // Minimal text header: system name inset to line up with the list gutter.
+        // Native font size (no RG_TEXT_BIGGER) -- BIGGER only stretches glyphs
+        // vertically, which distorts the title. The 24px face is already large
+        // and crisp on this panel.
         int x = gui.width / 24;
         rg_gui_draw_text(x, offset + HEADER_HEIGHT / 4, 0, tab->desc,
-                         gui.theme->foreground, C_TRANSPARENT, RG_TEXT_BIGGER);
+                         gui.theme->foreground, C_TRANSPARENT, 0);
     }
 }
 
@@ -522,8 +531,13 @@ void gui_draw_tab_indicator(void)
 
 void gui_draw_status(tab_t *tab)
 {
-    const int status_x = LOGO_WIDTH + 12;
-    const int status_y = HEADER_HEIGHT - 16;
+    // Anchor the status row to the font height, not a fixed constant: the old
+    // HEADER_HEIGHT-16 was tuned for an ~8px font and collided with the first
+    // list row once the font grew. Keeping the whole row inside the header band
+    // leaves the list area clear below it.
+    const int line_height = TEXT_RECT("A", 0).height;
+    const int status_x = gui.width / 24;
+    const int status_y = HEADER_HEIGHT - line_height - 4;
     char *txt_left = tab->status[tab->status[1].left[0] ? 1 : 0].left;
     char *txt_right = tab->status[tab->status[1].right[0] ? 1 : 0].right;
 
