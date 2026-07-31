@@ -2217,6 +2217,75 @@ static rg_gui_event_t app_options_cb(rg_gui_option_t *option, rg_gui_event_t eve
     return RG_DIALOG_VOID;
 }
 
+// --- Button remapping submenu -----------------------------------------------
+
+static rg_gui_event_t remap_key_cb(rg_gui_option_t *option, rg_gui_event_t event)
+{
+    rg_key_t from = (rg_key_t)option->arg;
+    rg_key_t to = rg_input_get_key_remap(from);
+    strcpy(option->value, rg_input_get_key_name(to));
+
+    if (event == RG_DIALOG_ENTER)
+    {
+        // Prompt, then capture a physical key. MENU/OPTION are rejected so a
+        // user can never strand themselves out of the menu.
+        char prompt[80];
+        snprintf(prompt, sizeof(prompt), _("Press a key for %s..."), option->label);
+        rg_gui_draw_message("%s", prompt);
+        rg_key_t captured = rg_input_capture_key(6000);
+        if (captured != RG_KEY_NONE && captured != RG_KEY_MENU && captured != RG_KEY_OPTION)
+        {
+            rg_input_set_key_remap(from, captured);
+            strcpy(option->value, rg_input_get_key_name(captured));
+            rg_settings_commit();
+        }
+        return RG_DIALOG_REDRAW;
+    }
+    return RG_DIALOG_VOID;
+}
+
+static rg_gui_event_t remap_reset_cb(rg_gui_option_t *option, rg_gui_event_t event)
+{
+    if (event == RG_DIALOG_ENTER)
+    {
+        rg_input_reset_key_remap();
+        rg_settings_commit();
+        return RG_DIALOG_REDRAW;
+    }
+    strcpy(option->value, "");
+    return RG_DIALOG_VOID;
+}
+
+static rg_gui_event_t button_map_cb(rg_gui_option_t *option, rg_gui_event_t event)
+{
+    if (event != RG_DIALOG_ENTER)
+        return RG_DIALOG_VOID;
+
+    // One entry per physically-present key. MENU/OPTION are virtual chords, so
+    // they are never offered -- remapping them is meaningless and remapping a
+    // physical key never breaks the chord (it is detected before the remap).
+    rg_gui_option_t opts[RG_KEY_COUNT + 2];
+    int n = 0;
+    for (int i = 0; i < RG_KEY_COUNT; i++)
+    {
+        rg_key_t key = (rg_key_t)(1u << i);
+        if (!rg_input_key_is_present(key) || key == RG_KEY_MENU || key == RG_KEY_OPTION)
+            continue;
+        opts[n].arg = (intptr_t)key;
+        opts[n].label = rg_input_get_key_name(key);
+        opts[n].value = "-";
+        opts[n].flags = RG_DIALOG_FLAG_NORMAL;
+        opts[n].update_cb = &remap_key_cb;
+        n++;
+    }
+    opts[n++] = (rg_gui_option_t){0, _("Restore defaults"), "-", RG_DIALOG_FLAG_NORMAL, &remap_reset_cb};
+    opts[n] = (rg_gui_option_t){0};
+
+    rg_display_force_redraw();
+    rg_gui_dialog(_("Button map"), opts, 0);
+    return RG_DIALOG_REDRAW;
+}
+
 void rg_gui_options_menu(void)
 {
     rg_gui_option_t options[20] = {
@@ -2225,6 +2294,7 @@ void rg_gui_options_menu(void)
         #endif
         {0, _("Volume"),        "-", RG_DIALOG_FLAG_NORMAL, &volume_update_cb},
         {0, _("Audio out"),     "-", RG_DIALOG_FLAG_NORMAL, &audio_update_cb},
+        {0, _("Button map"),    NULL, RG_DIALOG_FLAG_NORMAL, &button_map_cb},
         RG_DIALOG_END,
     };
     const rg_gui_option_t misc_options[] = {

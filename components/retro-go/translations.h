@@ -507,6 +507,21 @@ static const char *translations[][RG_LANG_MAX] =
         [RG_LANG_KO] = "사운드 출력",
     },
     {
+        [RG_LANG_EN] = "Button map",
+        [RG_LANG_ZH] = "按键映射",
+        [RG_LANG_KO] = "버튼 매핑",
+    },
+    {
+        [RG_LANG_EN] = "Restore defaults",
+        [RG_LANG_ZH] = "恢复默认",
+        [RG_LANG_KO] = "기본값 복원",
+    },
+    {
+        [RG_LANG_EN] = "Press a key for %s...",
+        [RG_LANG_ZH] = "请为 %s 按一个键...",
+        [RG_LANG_KO] = "%s 에 누를 키를 누르세요...",
+    },
+    {
         [RG_LANG_EN] = "Font type",
         [RG_LANG_ZH] = "字体类型",
         [RG_LANG_KO] = "글꼴 종류",

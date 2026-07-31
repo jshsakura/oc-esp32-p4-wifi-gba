@@ -99,6 +99,15 @@ bool rg_input_key_is_present(rg_key_t mask);
 bool rg_input_key_is_pressed(rg_key_t mask);
 bool rg_input_wait_for_key(rg_key_t mask, bool pressed, int timeout_ms);
 const char *rg_input_get_key_name(rg_key_t key);
+
+// Runtime key remapping (logical layer, applied after the hardware read and the
+// virtual chord detection, so it covers GPIO and I2C alike and never breaks the
+// MENU/OPTION chords). Defaults to identity.
+void rg_input_set_key_remap(rg_key_t from, rg_key_t to);
+rg_key_t rg_input_get_key_remap(rg_key_t from);
+void rg_input_reset_key_remap(void);
+// Wait for a single physical key press and return it (pre-remap). RG_KEY_NONE on timeout.
+rg_key_t rg_input_capture_key(int timeout_ms);
 uint32_t rg_input_read_gamepad(void);
 int rg_input_read_keyboard(void);
 rg_battery_t rg_input_read_battery(void);
