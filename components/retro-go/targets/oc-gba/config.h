@@ -217,3 +217,7 @@
 // DejaVu face compiled in as an external font. Only takes effect until the user picks a
 // font of their own (see rg_gui_init).
 #define RG_FONT_DEFAULT_NAME        "DejaVu 24"
+// Integer scaling is the natural fit for this panel (GBA 240x160 x3 = 720x480,
+// NES 256x240 x2 = 512x480, etc.), so make it the out-of-box default rather
+// than the fractional Fit that blurs pixels.
+#define RG_DISPLAY_SCALING_DEFAULT  RG_DISPLAY_SCALING_INT
