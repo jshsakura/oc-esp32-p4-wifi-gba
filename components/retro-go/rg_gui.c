@@ -2716,6 +2716,7 @@ void rg_gui_game_menu(void)
         {2000, _("Save & Quit"),     NULL, RG_DIALOG_FLAG_NORMAL, NULL},
         {3001, _("Load game"),       NULL, RG_DIALOG_FLAG_NORMAL, NULL},
         {3000, _("Reset"),           NULL, RG_DIALOG_FLAG_NORMAL, NULL},
+        {4000, _("Screenshot"),      NULL, RG_DIALOG_FLAG_NORMAL, NULL},
         #ifdef RG_ENABLE_NETPLAY
         {5000, _("Netplay"),         NULL, RG_DIALOG_FLAG_NORMAL, NULL},
         #endif
@@ -2747,6 +2748,8 @@ void rg_gui_game_menu(void)
         case 3001: if ((slot = rg_gui_savestate_menu(_("Load"), rom_path)) >= 0) rg_emu_load_state(slot); break;
         case 3002: rg_emu_reset(false); break;
         case 3003: rg_emu_reset(true); break;
+        case 4000: rg_emu_screenshot(RG_STORAGE_ROOT "/screenshot.png", 0, 0);
+                   rg_gui_alert(_("Screenshot"), _("Saved to /screenshot.png")); break;
     #ifdef RG_ENABLE_NETPLAY
         case 5000: rg_netplay_quick_start(); break;
     #endif

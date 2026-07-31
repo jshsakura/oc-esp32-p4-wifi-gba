@@ -547,6 +547,16 @@ static const char *translations[][RG_LANG_MAX] =
         [RG_LANG_KO] = "GBA 컬러",
     },
     {
+        [RG_LANG_EN] = "Screenshot",
+        [RG_LANG_ZH] = "截图",
+        [RG_LANG_KO] = "스크린샷",
+    },
+    {
+        [RG_LANG_EN] = "Saved to /screenshot.png",
+        [RG_LANG_ZH] = "已保存到 /screenshot.png",
+        [RG_LANG_KO] = "/screenshot.png 에 저장됨",
+    },
+    {
         [RG_LANG_EN] = "Font type",
         [RG_LANG_ZH] = "字体类型",
         [RG_LANG_KO] = "글꼴 종류",
