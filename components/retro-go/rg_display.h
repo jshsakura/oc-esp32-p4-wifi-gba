@@ -129,5 +129,15 @@ void rg_display_set_border(const char *filename);
 char *rg_display_get_border(void);
 void rg_display_set_custom_zoom(double factor);
 double rg_display_get_custom_zoom(void);
-void rg_display_set_scanline(int level);
+typedef enum
+{
+    RG_DISPLAY_SCANLINE_OFF = 0,
+    RG_DISPLAY_SCANLINE_H,       // Horizontal scanlines (CRT TV), 50%
+    RG_DISPLAY_SCANLINE_H_STRONG,// Horizontal scanlines, 25%
+    RG_DISPLAY_SCANLINE_V,       // Vertical aperture grille, 50%
+    RG_DISPLAY_SCANLINE_GRID,    // Horizontal + vertical pixel grid, 50%
+    RG_DISPLAY_SCANLINE_COUNT,
+} display_scanline_t;
+
+void rg_display_set_scanline(int mode);
 int rg_display_get_scanline(void);

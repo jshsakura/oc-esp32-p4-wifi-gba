@@ -564,6 +564,26 @@ static const char *translations[][RG_LANG_MAX] =
         [RG_LANG_KO] = "강하게",
     },
     {
+        [RG_LANG_EN] = "Scanlines",
+        [RG_LANG_ZH] = "扫描线",
+        [RG_LANG_KO] = "스캔라인",
+    },
+    {
+        [RG_LANG_EN] = "Scanlines+",
+        [RG_LANG_ZH] = "扫描线+",
+        [RG_LANG_KO] = "스캔라인+",
+    },
+    {
+        [RG_LANG_EN] = "Aperture",
+        [RG_LANG_ZH] = "光栅",
+        [RG_LANG_KO] = "조리개",
+    },
+    {
+        [RG_LANG_EN] = "Grid",
+        [RG_LANG_ZH] = "网格",
+        [RG_LANG_KO] = "그리드",
+    },
+    {
         [RG_LANG_EN] = "Pixel-perfect",
         [RG_LANG_ZH] = "像素完美",
         [RG_LANG_KO] = "픽셀 퍼펙트",

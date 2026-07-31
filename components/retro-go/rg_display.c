@@ -206,27 +206,41 @@ static inline void write_update(const rg_surface_t *update)
             }
         }
 
-        // CRT scanline effect: halve (subtle) or quarter (strong) the brightness
-        // of every other physical output line. line_buffer holds big-endian 565,
-        // so the byte swap and mask mirror blend_pixels. Only odd rows are touched;
-        // cost is about half a frame's worth of pixel ops (~5ms on a 720x480
-        // viewport at 360MHz) -- noticeable but acceptable on the display core.
-        if (config.scanline && need_update)
+        // CRT scanline / mask effects. line_buffer holds big-endian 565, so the
+        // byte swap and mask mirror blend_pixels. Patterns:
+        //   H/H_STRONG: darken odd rows (classic CRT TV lines), 50% / 25%.
+        //   V:          darken odd columns (aperture grille / LCD look).
+        //   GRID:       darken where row or column is odd (pixel grid).
+        // H only touches half the rows; V and GRID touch every row, so they cost
+        // roughly twice as much -- still fine on the display core.
+        if (config.scanline != RG_DISPLAY_SCANLINE_OFF && need_update)
         {
             int batch_top = y - lines_to_copy;
-            unsigned mask = (config.scanline >= 2) ? 0xE79C : 0xF7DE;
-            int shift = (config.scanline >= 2) ? 2 : 1;
+            int mode = config.scanline;
             for (int i = 0; i < lines_to_copy; ++i)
             {
-                if ((draw_top + batch_top + i) & 1)
+                int row_odd = (draw_top + batch_top + i) & 1;
+                bool do_row = (mode == RG_DISPLAY_SCANLINE_V) || (mode == RG_DISPLAY_SCANLINE_GRID) || row_odd;
+                if (!do_row)
+                    continue;
+                uint16_t *line = line_buffer + i * draw_width;
+                for (int x = 0; x < draw_width; ++x)
                 {
-                    uint16_t *line = line_buffer + i * draw_width;
-                    for (int x = 0; x < draw_width; ++x)
-                    {
-                        unsigned p = (line[x] << 8) | (line[x] >> 8);
-                        p = (p & mask) >> shift;
-                        line[x] = (p << 8) | (p >> 8);
-                    }
+                    bool dark;
+                    if (mode == RG_DISPLAY_SCANLINE_V)
+                        dark = (draw_left + x) & 1;
+                    else if (mode == RG_DISPLAY_SCANLINE_GRID)
+                        dark = row_odd || ((draw_left + x) & 1);
+                    else
+                        dark = true; // H / H_STRONG: whole odd row
+                    if (!dark)
+                        continue;
+                    unsigned p = (line[x] << 8) | (line[x] >> 8);
+                    if (mode == RG_DISPLAY_SCANLINE_H_STRONG)
+                        p = (p & 0xE79C) >> 2;   // quarter
+                    else
+                        p = (p & 0xF7DE) >> 1;   // half
+                    line[x] = (p << 8) | (p >> 8);
                 }
             }
         }
@@ -453,9 +467,9 @@ double rg_display_get_custom_zoom(void)
     return config.custom_zoom;
 }
 
-void rg_display_set_scanline(int level)
+void rg_display_set_scanline(int mode)
 {
-    config.scanline = RG_MIN(RG_MAX(level, 0), 2);
+    config.scanline = RG_MIN(RG_MAX(mode, 0), RG_DISPLAY_SCANLINE_COUNT - 1);
     rg_settings_set_number(NS_APP, SETTING_SCANLINE, config.scanline);
     // Force a full redraw so the effect applies to the current frame.
     memset(screen_line_checksum, 0xFF, sizeof(screen_line_checksum));
