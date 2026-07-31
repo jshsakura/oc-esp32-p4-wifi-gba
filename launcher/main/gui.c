@@ -399,6 +399,7 @@ void gui_redraw(void)
         gui_draw_status(tab);
         gui_draw_list(tab);
         gui_draw_preview(tab);
+        gui_draw_playtime(tab);
     }
     else
     {
@@ -431,6 +432,36 @@ void gui_draw_preview(tab_t *tab)
     int px = gui.width / 2 + (gui.width / 2 - width) / 2;
     int py = HEADER_HEIGHT + (gui.height - HEADER_HEIGHT - height) / 2;
     rg_gui_draw_image(px, py, width, height, true, tab->preview);
+}
+
+void gui_draw_playtime(tab_t *tab)
+{
+    // Show the selected game's accumulated playtime under the preview area,
+    // centred in the right half. Stored by the emulator on exit, keyed by the
+    // ROM basename (see rg_system_switch_app).
+    listbox_item_t *item = gui_get_selected_item(tab);
+    if (!item || !item->arg)
+        return;
+
+    retro_file_t *file = item->arg;
+    char key[48];
+    snprintf(key, sizeof(key), "Playtime.%s", file->name);
+    int seconds = rg_settings_get_number(NS_GLOBAL, key, 0);
+    if (seconds <= 0)
+        return;
+
+    char buf[24];
+    int h = seconds / 3600;
+    int m = (seconds % 3600) / 60;
+    if (h > 0)
+        snprintf(buf, sizeof(buf), "%dh %dm", h, m);
+    else if (m > 0)
+        snprintf(buf, sizeof(buf), "%dm", m);
+    else
+        snprintf(buf, sizeof(buf), "%ds", seconds);
+
+    int y = gui.height - TEXT_RECT(buf, 0).height - 6;
+    rg_gui_draw_text(gui.width / 2, y, gui.width / 2, buf, C_DIM_GRAY, C_TRANSPARENT, RG_TEXT_ALIGN_CENTER);
 }
 
 void gui_draw_background(tab_t *tab, int shade)

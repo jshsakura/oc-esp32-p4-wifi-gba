@@ -88,6 +88,8 @@ static rg_stats_t statistics;
 static rg_app_t app;
 static rg_task_t tasks[8];
 static rg_mutex_t *tasks_mutex = NULL;
+// Wall-clock time the current app session started, for playtime accounting.
+static int64_t session_start_time = 0;
 
 static const char *SETTING_BOOT_NAME = "BootName";
 static const char *SETTING_BOOT_ARGS = "BootArgs";
@@ -601,6 +603,7 @@ rg_app_t *rg_system_init(int sampleRate, const rg_handlers_t *handlers, void *_u
 
     rg_task_create("rg_sysmon", &system_monitor_task, NULL, 3 * 1024, RG_TASK_PRIORITY_5, RG_PERF_CORE_0);
     app.initialized = true;
+    session_start_time = rg_system_timer();
 
     update_memory_statistics();
     RG_LOGI("Available memory: %d/%d + %d/%d", statistics.freeMemoryInt / 1024, statistics.totalMemoryInt / 1024,
@@ -951,6 +954,24 @@ void rg_system_exit(void)
 void rg_system_switch_app(const char *partition, const char *name, const char *args, int save_slot, uint32_t flags)
 {
     RG_LOGI("Switching to app %s (%s)", partition ?: "-", name ?: "-");
+
+    // When an emulator session ends (we have a ROM and are heading back to the
+    // launcher), accumulate the elapsed playtime keyed by the ROM basename so
+    // the launcher can show it. Skipped for the launcher itself (romPath empty)
+    // and for game-to-game hops that don't pass through the launcher.
+    if (app.romPath && app.romPath[0] && partition && strcmp(partition, RG_APP_LAUNCHER) == 0)
+    {
+        int64_t elapsed_s = (rg_system_timer() - session_start_time) / 1000000;
+        if (elapsed_s > 0)
+        {
+            char key[48];
+            snprintf(key, sizeof(key), "Playtime.%s", rg_basename(app.romPath));
+            int total = rg_settings_get_number(NS_GLOBAL, key, 0) + (int)elapsed_s;
+            rg_settings_set_number(NS_GLOBAL, key, total);
+            rg_settings_commit();
+            RG_LOGI("Playtime for '%s' now %ds", rg_basename(app.romPath), total);
+        }
+    }
 
     if (update_boot_config(partition, name, args, save_slot, flags))
         rg_system_restart();
