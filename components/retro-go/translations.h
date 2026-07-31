@@ -554,6 +554,16 @@ static const char *translations[][RG_LANG_MAX] =
         [RG_LANG_KO] = "CRT 스캔라인",
     },
     {
+        [RG_LANG_EN] = "Subtle",
+        [RG_LANG_ZH] = "轻微",
+        [RG_LANG_KO] = "약하게",
+    },
+    {
+        [RG_LANG_EN] = "Strong",
+        [RG_LANG_ZH] = "强烈",
+        [RG_LANG_KO] = "강하게",
+    },
+    {
         [RG_LANG_EN] = "Pixel-perfect",
         [RG_LANG_ZH] = "像素完美",
         [RG_LANG_KO] = "픽셀 퍼펙트",

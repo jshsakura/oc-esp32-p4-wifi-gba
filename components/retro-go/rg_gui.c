@@ -1648,16 +1648,16 @@ static rg_gui_event_t filter_update_cb(rg_gui_option_t *option, rg_gui_event_t e
 
 static rg_gui_event_t scanline_update_cb(rg_gui_option_t *option, rg_gui_event_t event)
 {
-    bool on = rg_display_get_scanline();
+    int level = rg_display_get_scanline();
 
     if (event == RG_DIALOG_PREV || event == RG_DIALOG_NEXT)
     {
-        rg_display_set_scanline(!on);
-        on = rg_display_get_scanline();
+        level = (event == RG_DIALOG_NEXT) ? (level + 1) % 3 : (level + 2) % 3;
+        rg_display_set_scanline(level);
         return RG_DIALOG_REDRAW;
     }
 
-    strcpy(option->value, on ? _("On") : _("Off"));
+    strcpy(option->value, level == 0 ? _("Off") : (level == 1 ? _("Subtle") : _("Strong")));
     return RG_DIALOG_VOID;
 }
 

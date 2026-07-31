@@ -206,14 +206,16 @@ static inline void write_update(const rg_surface_t *update)
             }
         }
 
-        // CRT scanline effect: halve the brightness of every other physical
-        // output line. line_buffer holds big-endian 565, so the byte swap and
-        // 0xF7DE mask mirror blend_pixels. Only odd rows are touched, so the
+        // CRT scanline effect: halve (subtle) or quarter (strong) the brightness
+        // of every other physical output line. line_buffer holds big-endian 565,
+        // so the byte swap and mask mirror blend_pixels. Only odd rows are touched;
         // cost is about half a frame's worth of pixel ops (~5ms on a 720x480
         // viewport at 360MHz) -- noticeable but acceptable on the display core.
         if (config.scanline && need_update)
         {
             int batch_top = y - lines_to_copy;
+            unsigned mask = (config.scanline >= 2) ? 0xE79C : 0xF7DE;
+            int shift = (config.scanline >= 2) ? 2 : 1;
             for (int i = 0; i < lines_to_copy; ++i)
             {
                 if ((draw_top + batch_top + i) & 1)
@@ -222,7 +224,7 @@ static inline void write_update(const rg_surface_t *update)
                     for (int x = 0; x < draw_width; ++x)
                     {
                         unsigned p = (line[x] << 8) | (line[x] >> 8);
-                        p = (p & 0xF7DE) >> 1;
+                        p = (p & mask) >> shift;
                         line[x] = (p << 8) | (p >> 8);
                     }
                 }
@@ -451,15 +453,15 @@ double rg_display_get_custom_zoom(void)
     return config.custom_zoom;
 }
 
-void rg_display_set_scanline(bool on)
+void rg_display_set_scanline(int level)
 {
-    config.scanline = on;
-    rg_settings_set_boolean(NS_APP, SETTING_SCANLINE, on);
+    config.scanline = RG_MIN(RG_MAX(level, 0), 2);
+    rg_settings_set_number(NS_APP, SETTING_SCANLINE, config.scanline);
     // Force a full redraw so the effect applies to the current frame.
     memset(screen_line_checksum, 0xFF, sizeof(screen_line_checksum));
 }
 
-bool rg_display_get_scanline(void)
+int rg_display_get_scanline(void)
 {
     return config.scanline;
 }
@@ -667,7 +669,7 @@ void rg_display_init(void)
         .rotation = rg_settings_get_number(NS_APP, SETTING_ROTATION, RG_DISPLAY_ROTATION_AUTO),
         .border_file = rg_settings_get_string(NS_APP, SETTING_BORDER, NULL),
         .custom_zoom = rg_settings_get_number(NS_APP, SETTING_CUSTOM_ZOOM, 1.0),
-        .scanline = rg_settings_get_boolean(NS_APP, SETTING_SCANLINE, false),
+        .scanline = rg_settings_get_number(NS_APP, SETTING_SCANLINE, 0),
     };
     display = (rg_display_t){
         .screen.real_width = RG_SCREEN_WIDTH,

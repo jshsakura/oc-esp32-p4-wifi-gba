@@ -52,7 +52,7 @@ typedef struct
     display_backlight_t backlight;
     char *border_file;
     double custom_zoom;
-    bool scanline; // CRT effect: darken every other output line on emulator frames
+    int scanline; // CRT effect strength: 0=off, 1=subtle (50%), 2=strong (25%)
 } rg_display_config_t;
 
 typedef struct
@@ -129,5 +129,5 @@ void rg_display_set_border(const char *filename);
 char *rg_display_get_border(void);
 void rg_display_set_custom_zoom(double factor);
 double rg_display_get_custom_zoom(void);
-void rg_display_set_scanline(bool on);
-bool rg_display_get_scanline(void);
+void rg_display_set_scanline(int level);
+int rg_display_get_scanline(void);
