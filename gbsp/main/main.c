@@ -1,6 +1,7 @@
 #include <rg_system.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include "../components/gbsp-libretro/common.h"
 #include "../components/gbsp-libretro/memmap.h"
@@ -48,6 +49,76 @@ static bool screenshot_handler(const char *filename, int width, int height)
     return rg_surface_save_image_file(currentUpdate, filename, width, height);
 }
 
+// --- GBA color correction -------------------------------------------------
+// GBA games were tuned for the dark original LCD and look flat on a modern IPS.
+// A gentle gamma boost (0.85) on the 240x160 frame buffer restores the contrast
+// the artists intended, at 1/9 the cost of doing it in the scaled display path.
+static uint16_t gba_lut5[32], gba_lut6[64];
+
+static void gba_lut_init(void)
+{
+    for (int i = 0; i < 32; i++)
+        gba_lut5[i] = RG_MIN(31, (int)(powf((float)i / 31.f, 0.85f) * 31.f + 0.5f));
+    for (int i = 0; i < 64; i++)
+        gba_lut6[i] = RG_MIN(63, (int)(powf((float)i / 63.f, 0.85f) * 63.f + 0.5f));
+}
+
+static void gba_color_correct(rg_surface_t *surf)
+{
+    if (!surf || !surf->data)
+        return;
+    uint16_t *data = surf->data;
+    int pixels = surf->width * surf->height;
+    for (int i = 0; i < pixels; i++)
+    {
+        uint16_t px = data[i];
+        data[i] = (gba_lut5[(px >> 11) & 0x1F] << 11)
+                | (gba_lut6[(px >> 5) & 0x3F] << 5)
+                | gba_lut5[px & 0x1F];
+    }
+}
+
+static bool gba_color_enabled(void)
+{
+    return rg_settings_get_number(NS_APP, "GbaColor", 0);
+}
+
+static void gba_maybe_correct(rg_surface_t *surf)
+{
+    static bool lut_ready = false;
+    if (!lut_ready)
+    {
+        gba_lut_init();
+        lut_ready = true;
+    }
+    if (gba_color_enabled())
+        gba_color_correct(surf);
+}
+
+// Menu toggle for the color correction, shown under "Emulator options".
+static rg_gui_event_t gba_color_cb(rg_gui_option_t *option, rg_gui_event_t event)
+{
+    bool on = rg_settings_get_number(NS_APP, "GbaColor", 0);
+    if (event == RG_DIALOG_PREV || event == RG_DIALOG_NEXT)
+    {
+        on = !on;
+        rg_settings_set_number(NS_APP, "GbaColor", on);
+        rg_settings_commit();
+        return RG_DIALOG_REDRAW;
+    }
+    strcpy(option->value, on ? _("On") : _("Off"));
+    return RG_DIALOG_VOID;
+}
+
+static void options_handler(rg_gui_option_t *dest)
+{
+    int end = 0;
+    while (dest[end].label || dest[end].value || dest[end].arg || dest[end].flags || dest[end].update_cb)
+        end++;
+    dest[end] = (rg_gui_option_t){0, _("GBA Color"), "-", RG_DIALOG_FLAG_NORMAL, &gba_color_cb};
+    dest[end + 1] = (rg_gui_option_t)RG_DIALOG_END;
+}
+
 static bool save_state_handler(const char *filename)
 {
     return false;
@@ -67,6 +138,7 @@ static void event_handler(int event, void *arg)
 {
     if (event == RG_EVENT_REDRAW)
     {
+        gba_maybe_correct(currentUpdate);
         rg_display_submit(currentUpdate, 0);
     }
 }
@@ -99,6 +171,7 @@ void app_main(void)
         .reset = &reset_handler,
         .screenshot = &screenshot_handler,
         .event = &event_handler,
+        .options = &options_handler,
     };
 
     app = rg_system_init(AUDIO_SAMPLE_RATE, &handlers, NULL);
@@ -294,7 +367,10 @@ void app_main(void)
         // RG_TIMER_LAP("execute_arm");
 
         if (!skip_next_frame)
+        {
+            gba_maybe_correct(currentUpdate);
             rg_display_submit(currentUpdate, 0);
+        }
 
         size_t frames_count = sound_read_samples((s16 *)mixbuffer, AUDIO_BUFFER_LENGTH);
         // RG_TIMER_LAP("sound_read_samples");

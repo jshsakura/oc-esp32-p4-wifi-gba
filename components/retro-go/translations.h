@@ -542,6 +542,11 @@ static const char *translations[][RG_LANG_MAX] =
         [RG_LANG_KO] = "일치하는 항목 없음",
     },
     {
+        [RG_LANG_EN] = "GBA Color",
+        [RG_LANG_ZH] = "GBA 色彩",
+        [RG_LANG_KO] = "GBA 컬러",
+    },
+    {
         [RG_LANG_EN] = "Font type",
         [RG_LANG_ZH] = "字体类型",
         [RG_LANG_KO] = "글꼴 종류",
