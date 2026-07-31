@@ -522,6 +522,26 @@ static const char *translations[][RG_LANG_MAX] =
         [RG_LANG_KO] = "%s 에 누를 키를 누르세요...",
     },
     {
+        [RG_LANG_EN] = "Search",
+        [RG_LANG_ZH] = "搜索",
+        [RG_LANG_KO] = "검색",
+    },
+    {
+        [RG_LANG_EN] = "Enter search text",
+        [RG_LANG_ZH] = "输入搜索文字",
+        [RG_LANG_KO] = "검색어 입력",
+    },
+    {
+        [RG_LANG_EN] = "Search results",
+        [RG_LANG_ZH] = "搜索结果",
+        [RG_LANG_KO] = "검색 결과",
+    },
+    {
+        [RG_LANG_EN] = "No matches found",
+        [RG_LANG_ZH] = "未找到匹配项",
+        [RG_LANG_KO] = "일치하는 항목 없음",
+    },
+    {
         [RG_LANG_EN] = "Font type",
         [RG_LANG_ZH] = "字体类型",
         [RG_LANG_KO] = "글꼴 종류",
