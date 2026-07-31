@@ -121,12 +121,51 @@ static void options_handler(rg_gui_option_t *dest)
 
 static bool save_state_handler(const char *filename)
 {
-    return false;
+    // Serialize the emulator state into a PSRAM buffer via the gbsp-libretro
+    // BSON API, then flush it to the file. Up to GBA_STATE_MEM_SIZE (416KB).
+    u8 *buffer = (u8 *)rg_alloc(GBA_STATE_MEM_SIZE, MEM_SLOW);
+    if (!buffer)
+        return false;
+    unsigned size = main_write_savestate(buffer);
+    bool ok = false;
+    if (size > 0)
+    {
+        FILE *f = fopen(filename, "wb");
+        if (f)
+        {
+            ok = (fwrite(buffer, 1, size, f) == size);
+            fclose(f);
+        }
+    }
+    free(buffer);
+    return ok;
 }
 
 static bool load_state_handler(const char *filename)
 {
-    return false;
+    FILE *f = fopen(filename, "rb");
+    if (!f)
+        return false;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size <= 0 || size > GBA_STATE_MEM_SIZE)
+    {
+        fclose(f);
+        return false;
+    }
+    u8 *buffer = (u8 *)rg_alloc(size, MEM_SLOW);
+    if (!buffer)
+    {
+        fclose(f);
+        return false;
+    }
+    bool ok = (fread(buffer, 1, size, f) == (size_t)size);
+    fclose(f);
+    if (ok)
+        ok = main_read_savestate(buffer);
+    free(buffer);
+    return ok;
 }
 
 static bool reset_handler(bool hard)
