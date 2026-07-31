@@ -424,7 +424,13 @@ void gui_draw_preview(tab_t *tab)
                          (float)PREVIEW_HEIGHT / tab->preview->height);
     int width = (int)(tab->preview->width * scale);
     int height = (int)(tab->preview->height * scale);
-    rg_gui_draw_image(-width, -height, width, height, true, tab->preview);
+
+    // Centre the fitted cover in the right-half preview region so it reads as
+    // intentional negative space rather than art crammed into the corner.
+    // Horizontal: centred in [width/2, width]. Vertical: centred below the header.
+    int px = gui.width / 2 + (gui.width / 2 - width) / 2;
+    int py = HEADER_HEIGHT + (gui.height - HEADER_HEIGHT - height) / 2;
+    rg_gui_draw_image(px, py, width, height, true, tab->preview);
 }
 
 void gui_draw_background(tab_t *tab, int shade)
