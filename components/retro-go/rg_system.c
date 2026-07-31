@@ -701,16 +701,24 @@ rg_task_t *rg_task_current(void)
     return result;
 }
 
+// A task that returns leaves task_wrapper to delete its queue and zero its slot -- but
+// whoever created it still holds the same pointer, now aimed at a zeroed struct. FreeRTOS
+// aborts on a NULL queue, so without these checks the crash lands during shutdown, where it
+// costs a clean restart and leaves a crash log blaming the wrong thing. Found by the system
+// monitor task, which keeps running while everything else is being torn down and tries to
+// tell the user the app has stopped ticking.
 bool rg_task_send(rg_task_t *task, const rg_task_msg_t *msg)
 {
     RG_ASSERT_ARG(task && msg);
+    if (!task->queue)
+        return false;
     return xQueueSend(task->queue, msg, portMAX_DELAY) == pdTRUE;
 }
 
 bool rg_task_peek(rg_task_msg_t *out)
 {
     rg_task_t *task = rg_task_current();
-    if (!task || !out)
+    if (!task || !out || !task->queue)
         return false;
     return xQueuePeek(task->queue, out, portMAX_DELAY) == pdTRUE;
 }
@@ -718,7 +726,7 @@ bool rg_task_peek(rg_task_msg_t *out)
 bool rg_task_receive(rg_task_msg_t *out)
 {
     rg_task_t *task = rg_task_current();
-    if (!task || !out)
+    if (!task || !out || !task->queue)
         return false;
     return xQueueReceive(task->queue, out, portMAX_DELAY) == pdTRUE;
 }
@@ -726,6 +734,8 @@ bool rg_task_receive(rg_task_msg_t *out)
 size_t rg_task_messages_waiting(rg_task_t *task)
 {
     if (!task) task = rg_task_current();
+    if (!task || !task->queue)
+        return 0;
     return uxQueueMessagesWaiting(task->queue);
 }
 
