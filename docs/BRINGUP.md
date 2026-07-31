@@ -230,6 +230,14 @@ p8_vm            2%      ← 에뮬레이터
 **패널 없이 성능을 잴 때는 `CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS`를 켜고 누가 CPU를 쓰는지
 이름으로 확인하는 것이 먼저다.** 벽시계 시간만 보면 굶는 쪽을 범인으로 지목하게 된다.
 
+### 한글 파일명 — 아직 확인 안 됨
+
+빌드가 `CONFIG_FATFS_CODEPAGE_437`(US ASCII) + 기본 ANSI/OEM API 인코딩이다. **한글 이름의 롬이
+목록에는 뜨는데 열리지 않는 증상이 나오면 이것이다.** 한국어 UI를 내장한 기기이므로 결국은
+`CONFIG_FATFS_CODEPAGE_949` + `CONFIG_FATFS_API_ENCODING_UTF_8`로 가야 하지만, DBCS 코드페이지는
+변환 테이블이 커서 플래시를 먹는다. 카드가 손에 있을 때 한글 이름 파일 하나로 먼저 확인할 것 —
+바꾸기 전에 증상부터 재현하는 쪽이 싸다. `tools/prepare_sd.py`가 복사할 때 경고한다.
+
 ### 카트로 다시 잴 때
 
 아직 BIOS 카트(자체 브라우저)로만 쟀다. 진짜 게임은 다르다:
