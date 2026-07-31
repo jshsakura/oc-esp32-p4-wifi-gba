@@ -1330,6 +1330,114 @@ void rg_gui_draw_virtual_keyboard(int x_pos, int y_pos, const rg_keyboard_layout
     }
 }
 
+// --- Hangul composition engine -------------------------------------------------
+// Composes compatibility jamo (U+3131-U+3163) typed on the on-screen keyboard
+// into Unicode Hangul syllables (U+AC00-U+D7A3) using the standard formula
+//   syllable = 0xAC00 + (L*21 + V)*28 + T
+// State machine handles L -> LV -> LVT. Compound jamo and jongseong migration
+// are out of scope for v1; the common single-jamo path covers most Korean input.
+
+static int jamo_to_choseong(uint32_t c)
+{
+    switch (c)
+    {
+    case 0x3131: return 0;  case 0x3132: return 1;  case 0x3134: return 2;
+    case 0x3137: return 3;  case 0x3138: return 4;  case 0x3139: return 5;
+    case 0x3141: return 6;  case 0x3142: return 7;  case 0x3143: return 8;
+    case 0x3145: return 9;  case 0x3146: return 10; case 0x3147: return 11;
+    case 0x3148: return 12; case 0x3149: return 13; case 0x314A: return 14;
+    case 0x314B: return 15; case 0x314C: return 16; case 0x314D: return 17;
+    case 0x314E: return 18;
+    default: return -1;
+    }
+}
+
+static int jamo_to_jungseong(uint32_t c)
+{
+    if (c >= 0x314F && c <= 0x3163)
+        return c - 0x314F; // ㅏ=0 ... ㅣ=20
+    return -1;
+}
+
+static int jamo_to_jongseong(uint32_t c)
+{
+    switch (c)
+    {
+    case 0x3131: return 1;  case 0x3132: return 2;  case 0x3134: return 4;
+    case 0x3137: return 7;  case 0x3139: return 8;  case 0x3141: return 16;
+    case 0x3142: return 17; case 0x3145: return 19; case 0x3146: return 20;
+    case 0x3147: return 21; case 0x3148: return 22; case 0x314A: return 23;
+    case 0x314B: return 24; case 0x314C: return 25; case 0x314D: return 26;
+    case 0x314E: return 27;
+    default: return 0; // not valid as a trailing consonant (e.g. ㄸ ㅃ ㅉ)
+    }
+}
+
+static struct { int l, v, t; } hangul_state = {-1, -1, 0};
+
+static void hangul_reset(void)
+{
+    hangul_state.l = -1;
+    hangul_state.v = -1;
+    hangul_state.t = 0;
+}
+
+static uint32_t hangul_syllable(void)
+{
+    if (hangul_state.l >= 0 && hangul_state.v >= 0)
+        return 0xAC00 + (hangul_state.l * 21 + hangul_state.v) * 28 + hangul_state.t;
+    return 0;
+}
+
+// Feed one jamo. Returns the codepoint to show, and sets *replace if it updates
+// the last buffer codepoint rather than appending a new one.
+static uint32_t hangul_feed(uint32_t jamo, bool *replace)
+{
+    *replace = false;
+    int ch = jamo_to_choseong(jamo);
+    int ju = jamo_to_jungseong(jamo);
+    int jo = jamo_to_jongseong(jamo);
+
+    if (ch >= 0)
+    {
+        // A consonant. If we are at LV and it can be a trailing consonant, add it as T.
+        if (hangul_state.l >= 0 && hangul_state.v >= 0 && hangul_state.t == 0 && jo > 0)
+        {
+            hangul_state.t = jo;
+            *replace = true;
+            return hangul_syllable();
+        }
+        // Otherwise start a new syllable with this consonant as the initial.
+        hangul_state.l = ch;
+        hangul_state.v = -1;
+        hangul_state.t = 0;
+        return jamo; // standalone consonant until a vowel arrives
+    }
+
+    if (ju >= 0)
+    {
+        if (hangul_state.l >= 0 && hangul_state.v < 0)
+        {
+            // L + V -> LV
+            hangul_state.v = ju;
+            *replace = true;
+            return hangul_syllable();
+        }
+        // No initial consonant (or already has a vowel): commit, standalone vowel.
+        hangul_state.l = -1;
+        hangul_state.v = ju;
+        hangul_state.t = 0;
+        return jamo;
+    }
+
+    return jamo; // not a jamo (e.g. space)
+}
+
+static bool layout_is_hangul(const rg_keyboard_layout_t *layout)
+{
+    return layout && (uint8_t)layout->layout[0] >= 0xEA; // Hangul jamo are 3-byte UTF-8 starting with 0xEA/0xE3
+}
+
 static const rg_keyboard_layout_t keyboard_layouts[] = {
     // Lowercase letters
     {
@@ -1360,6 +1468,17 @@ static const rg_keyboard_layout_t keyboard_layouts[] = {
         .columns = 10,
         .rows = 4,
         .label = "!@#",
+    },
+    // Hangul (Korean) jamo -- the composition engine in hangul_feed() turns
+    // these into syllables. Arranged: consonants, then vowels.
+    {
+        .layout = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅ"
+                    "ㅆㅇㅈㅉㅊㅋㅌㅍㅎ "
+                    "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘ"
+                    "ㅙㅚㅛㅜㅝㅟㅠㅡㅢㅣ",
+        .columns = 10,
+        .rows = 4,
+        .label = "가",
     }
 };
 
@@ -1480,14 +1599,41 @@ char *rg_gui_input_str(const char *title, const char *message, const char *defau
                     int key = 0;
                     for (int i = 0; i <= cursor_pos; ++i)
                         key = rg_utf8_decode(&layout_ptr);
-                    input_length += rg_utf8_encode(&input_buffer[input_length], key);
+
+                    if (layout_is_hangul(current_layout) && key != ' ')
+                    {
+                        // Route through the Hangul composition engine: it either
+                        // extends the in-progress syllable (replace last char) or
+                        // starts a new one (append).
+                        bool replace;
+                        uint32_t syllable = hangul_feed(key, &replace);
+                        if (replace && input_length > 0)
+                        {
+                            while (input_length > 0)
+                            {
+                                const char *ptr = &input_buffer[--input_length];
+                                if (rg_utf8_decode(&ptr) != -1)
+                                    break;
+                            }
+                        }
+                        input_length += rg_utf8_encode(&input_buffer[input_length], syllable);
+                    }
+                    else
+                    {
+                        // Space or non-Hangul: commit any open syllable first.
+                        if (layout_is_hangul(current_layout))
+                            hangul_reset();
+                        input_length += rg_utf8_encode(&input_buffer[input_length], key);
+                    }
                     input_buffer[input_length] = '\0';
                     redraw = true;
                 }
             }
             else if (joystick & RG_KEY_B)
             {
-                // Backspace
+                // Backspace. Reset the Hangul composer so the next jamo starts a
+                // fresh syllable rather than extending the deleted one.
+                hangul_reset();
                 while (input_length > 0)
                 {
                     // Rewind until we find a valid codepoint
@@ -1500,7 +1646,8 @@ char *rg_gui_input_str(const char *title, const char *message, const char *defau
             }
             else if (joystick & RG_KEY_SELECT)
             {
-                // Toggle between layouts (Shift/Symbols)
+                // Toggle between layouts (Shift/Symbols/Hangul)
+                hangul_reset();
                 layout_idx = (layout_idx + 1) % RG_COUNT(keyboard_layouts);
                 current_layout = &keyboard_layouts[layout_idx];
                 cursor_pos = 0;
