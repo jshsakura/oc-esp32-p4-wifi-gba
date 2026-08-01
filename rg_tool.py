@@ -31,6 +31,7 @@ PROJECT_APPS = {
   'stella-go':    [0, 0, 851968],
   'ngpocket-go':  [0, 0, 1114112],
   'supervision-go': [0, 0, 589824],
+  'pkmini-go':      [0, 0, 589824],
 }
 # PROJECT_APPS = {}
 # for t in glob.glob("*/CMakeLists.txt"):
