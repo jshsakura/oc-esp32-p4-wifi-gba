@@ -723,6 +723,9 @@ void applications_init(void)
     application("Bandai WonderSwan", "wsc", "ws wsc zip", "wswan-go", 0);
     application("Nintendo Virtual Boy", "vb", "vb bin zip", "vb-go", 0);
     application("MSX", "msx", "rom mx1 mx2 dsk", "fmsx", 0);
+    // Carts are either .p8 text or .p8.png, where the cart is steganographed into the pixels
+    // of the label image -- so "png" here is a cart extension, not a cover.
+    application("PICO-8", "p8", "p8 png", "fake08", 0);
 
     // Special app to bootstrap native esp32 binaries from the SD card
     // application("Bootstrap", "apps", "bin elf", "bootstrap", 0);

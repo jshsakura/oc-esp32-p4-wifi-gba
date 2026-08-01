@@ -309,6 +309,7 @@ xtensa-esp32-elf-addr2line -ifCe app-name/build/app-name.elf
 
 - [README.md](README.md) - 项目介绍和安装指南
 - [BUILDING.md](BUILDING.md) - 详细构建说明
-- [PORTING.md](PORTING.md) - 移植指南
-- [LOCALIZATION.md](LOCALIZATION.md) - 翻译指南
-- [项目说明.md](项目说明.md) - 中文详细说明（包含 ESP32-P4 特定内容）
+- [docs/BRINGUP.md](docs/BRINGUP.md) - 实机验证清单与实测数据（韩文）
+- [docs/ROADMAP.md](docs/ROADMAP.md) - 性能与设计路线图（韩文）
+- [docs/FLASHING.md](docs/FLASHING.md) - 烧录、接线、SD 卡布局、恢复
+- [docs/upstream/项目说明.md](docs/upstream/项目说明.md) - 中文详细说明（包含 ESP32-P4 特定内容）

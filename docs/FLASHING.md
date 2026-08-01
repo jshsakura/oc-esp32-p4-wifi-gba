@@ -15,8 +15,9 @@ path and the shell.
 python3 rg_tool.py --target oc-gba-devkit build-img
 ```
 
-That writes `retro-go_<rev>_oc-gba-devkit.img`, about 3.9 MB, containing the bootloader, the
-partition table, and the three apps: `launcher`, `retro-core` and `gbsp`.
+That writes `retro-go_<rev>_oc-gba-devkit.img`, about 8.1 MB, containing the bootloader, the
+partition table, and all six apps: `launcher`, `retro-core`, `prboom-go`, `gwenesis`, `fmsx`
+and `gbsp`.
 
 ## Flash
 
@@ -83,9 +84,22 @@ the behaviour you want on a handheld with a hard power switch.
 
 A crash writes `/sd/crash.log` and returns to the launcher rather than to whatever crashed.
 
+## What has run, and what has not
+
+On a bare dev board with an SD card and no panel: boot to `app_main` in 384ms, the card
+mounting, the ES8311 answering at 0x18 and taking its configuration, the launcher building its
+16 tabs, the Korean font loading, the boot-loop rescue, the display timeout below, and the I2C
+backoff that keeps the two absent expanders from flooding the log.
+
+Not yet: anything that needs the panel, the buttons or the carrier board.
+
+[BRINGUP.md](BRINGUP.md) is the checklist, including two ways around the missing hardware —
+a jumper wire to ground is a button press, and the boot target can be written from a PC, so a
+ROM can be launched with neither buttons nor a display.
+
 ## Known unknowns
 
-None of this has run on hardware yet. In rough order of likelihood:
+In rough order of likelihood, once a panel is plugged in:
 
 - **The panel stays dark.** The ST7701S init sequence is the generic 480x800 one the base
   driver shipped with, not the D310N9362V0's. See the notes in `targets/oc-gba/config.h` for
@@ -93,8 +107,10 @@ None of this has run on hardware yet. In rough order of likelihood:
 - **The image is upside down.** The rotation direction is a guess until the panel is
   physically in a shell; `st7701.h` names the one line to flip.
 - **Red and blue are swapped.** Frame buffer byte order, one line in the same file.
-- **No sound.** The codec is configured through Espressif's driver, so the likely culprits
-  are MCLK not reaching it or the amplifier enable being inverted, not the register values.
+- **Nothing audible.** The codec is present and configured, which rules out the register
+  values and MCLK, and leaves the amplifier: `NS4150B` enable polarity, or the carrier board's
+  wiring to it. Dropping a `/boot/boot.wav` on the card is the cheapest test, since it plays
+  before anything else needs to work.
 
 ## Korean
 

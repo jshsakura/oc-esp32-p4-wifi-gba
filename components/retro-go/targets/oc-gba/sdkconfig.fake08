@@ -1,0 +1,10 @@
+# Overlay for the PICO-8 app only.
+#
+# z8lua implements Lua's error handling with C++ throw, and pcall() is not optional for
+# running carts: with exceptions disabled ESP-IDF links a __cxa_throw that aborts, so a cart
+# with a bug would take the firmware down instead of returning to the launcher.
+#
+# It lives here rather than in the shared sdkconfig because the exception tables cost every
+# app internal RAM, and retro-core has none to spare -- it went 165 bytes over and the linker
+# blamed libstdc++.
+CONFIG_COMPILER_CXX_EXCEPTIONS=y

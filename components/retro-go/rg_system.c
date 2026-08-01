@@ -704,16 +704,24 @@ rg_task_t *rg_task_current(void)
     return result;
 }
 
+// A task that returns leaves task_wrapper to delete its queue and zero its slot -- but
+// whoever created it still holds the same pointer, now aimed at a zeroed struct. FreeRTOS
+// aborts on a NULL queue, so without these checks the crash lands during shutdown, where it
+// costs a clean restart and leaves a crash log blaming the wrong thing. Found by the system
+// monitor task, which keeps running while everything else is being torn down and tries to
+// tell the user the app has stopped ticking.
 bool rg_task_send(rg_task_t *task, const rg_task_msg_t *msg)
 {
     RG_ASSERT_ARG(task && msg);
+    if (!task->queue)
+        return false;
     return xQueueSend(task->queue, msg, portMAX_DELAY) == pdTRUE;
 }
 
 bool rg_task_peek(rg_task_msg_t *out)
 {
     rg_task_t *task = rg_task_current();
-    if (!task || !out)
+    if (!task || !out || !task->queue)
         return false;
     return xQueuePeek(task->queue, out, portMAX_DELAY) == pdTRUE;
 }
@@ -721,7 +729,7 @@ bool rg_task_peek(rg_task_msg_t *out)
 bool rg_task_receive(rg_task_msg_t *out)
 {
     rg_task_t *task = rg_task_current();
-    if (!task || !out)
+    if (!task || !out || !task->queue)
         return false;
     return xQueueReceive(task->queue, out, portMAX_DELAY) == pdTRUE;
 }
@@ -729,6 +737,8 @@ bool rg_task_receive(rg_task_msg_t *out)
 size_t rg_task_messages_waiting(rg_task_t *task)
 {
     if (!task) task = rg_task_current();
+    if (!task || !task->queue)
+        return 0;
     return uxQueueMessagesWaiting(task->queue);
 }
 
@@ -1329,6 +1339,26 @@ void rg_system_set_overclock(int level)
     if (!original_tickRate)
         original_tickRate = app.tickRate;
     app.tickRate = original_tickRate * (360.f / real_mhz);
+
+    // Believe the measurement, not the request.
+    //
+    // Measured on this board: the CPU PLL saturates around 429MHz. Ask for 480 and the
+    // divider is applied to 429 instead, so level 6 gives 429, level 5 gives 429*23/24 = 411,
+    // level 3 gives 429*21/22 = 409 -- each within a few percent of what was requested, and
+    // none of them what was requested. Below 300MHz it stops tracking too. What actually
+    // works is 300 to 400MHz, which is levels -3 to +2.
+    //
+    // The old code printed the requested number regardless, so "480Mhz applied" meant 429.
+    // An overclock nobody can trust is worse than not having one, hence a tight tolerance:
+    // 2% plus 2MHz covers the measurement's own jitter and nothing else.
+    int tolerance = target_freq / 50 + 2;
+    if (level != 0 && (real_mhz < target_freq - tolerance || real_mhz > target_freq + tolerance))
+    {
+        RG_LOGW("Overclock level %d asked for %dMhz but measured %dMhz -- refusing, back to stock",
+                level, target_freq, real_mhz);
+        rg_system_set_overclock(0);
+        return;
+    }
 
     app.overclock = level;
     app.frameskip = 1;

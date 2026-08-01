@@ -16,6 +16,8 @@ build/
 # Built images. The base repo's prebuilt retro-go_2.0_esp32p4.img is already tracked and
 # stays that way -- it is the only working reference binary this fork shipped with.
 /*.img
+# Older images moved out of the root to keep it readable. Nothing here is needed to build.
+/images/
 
 # SDL2 build
 /sd

@@ -220,6 +220,10 @@ void pce_main(void)
     free(palette);
 
     emulationPaused = true;
+    // 2KB was enough on the Xtensa parts this came from. It is not here: RISC-V frames are
+    // larger, and on hardware this overflowed the moment a ROM finished loading -- the app
+    // rebooted with no message anyone could read, which is what made PC Engine the one core
+    // in the audit that would not run.
     rg_task_create("pce_sound", &audioTask, NULL, 4 * 1024, RG_TASK_PRIORITY_2, 1);
 
     InitPCE(app->sampleRate, true);
