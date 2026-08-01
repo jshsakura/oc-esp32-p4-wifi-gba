@@ -33,6 +33,7 @@ PROJECT_APPS = {
   'supervision-go': [0, 0, 589824],
   'pkmini-go':      [0, 0, 589824],
   'wswan-go':       [0, 0, 589824],
+  'vb-go':          [0, 0, 851968],
 }
 # PROJECT_APPS = {}
 # for t in glob.glob("*/CMakeLists.txt"):

@@ -721,6 +721,7 @@ void applications_init(void)
     application("Watara Supervision", "supervision", "sv bin zip", "supervision-go", 0);
     application("Pokemon Mini", "poke", "min zip", "pkmini-go", 0);
     application("Bandai WonderSwan", "wsc", "ws wsc zip", "wswan-go", 0);
+    application("Nintendo Virtual Boy", "vb", "vb bin zip", "vb-go", 0);
     application("MSX", "msx", "rom mx1 mx2 dsk", "fmsx", 0);
 
     // Special app to bootstrap native esp32 binaries from the SD card
