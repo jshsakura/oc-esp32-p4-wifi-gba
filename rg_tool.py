@@ -163,7 +163,7 @@ def _stamp_target(app, target):
     """Remember which retro-go target this app's sdkconfig was generated for."""
     try:
         with open(os.path.join(os.getcwd(), app, "sdkconfig.rgtarget"), "w") as f:
-            f.write(target)
+            f.write(target + ("+overlay" if os.path.exists(f"components/retro-go/targets/{target}/sdkconfig.{app}") else ""))
     except OSError:
         pass
 
@@ -181,6 +181,9 @@ def build_app(app, device_type, with_profiling=False, no_networking=False, is_re
     with open("partitions.csv", "w") as f:
         f.write("# This table isn't used, it's just needed to avoid esp-idf build failures.\n")
         f.write("dummy, app, ota_0, 65536, 3145728\n")
+    defaults = sdkconfig_defaults_for(app, device_type)
+    if defaults:
+        os.putenv("SDKCONFIG_DEFAULTS", defaults)
     run(args, cwd=os.path.join(os.getcwd(), app))
     _stamp_target(app, device_type)
     print("Done.\n")
@@ -256,8 +259,24 @@ if os.path.exists(f"components/retro-go/targets/{args.target}/env.py"):
         if env_no_networking:
             args.no_networking = True
 
-if os.path.exists(f"components/retro-go/targets/{args.target}/sdkconfig"):
-    os.putenv("SDKCONFIG_DEFAULTS", os.path.abspath(f"components/retro-go/targets/{args.target}/sdkconfig"))
+def sdkconfig_defaults_for(app, target):
+    """The target's sdkconfig, plus an optional per-app overlay next to it.
+
+    One app needing an option is not a reason to give it to all of them: enabling C++
+    exceptions for the PICO-8 app (Lua throws) pushed retro-core 165 bytes past the end of
+    internal RAM, and the linker reported it as discarded sections from libstdc++ rather than
+    as "out of memory". An overlay named sdkconfig.<app> keeps that cost where it belongs.
+    """
+    files = []
+    base = f"components/retro-go/targets/{target}/sdkconfig"
+    if os.path.exists(base):
+        files.append(os.path.abspath(base))
+    overlay = f"{base}.{app}"
+    if os.path.exists(overlay):
+        files.append(os.path.abspath(overlay))
+    return ";".join(files)
+
+
 os.putenv("IDF_TARGET", IDF_TARGET)
 
 command = args.command

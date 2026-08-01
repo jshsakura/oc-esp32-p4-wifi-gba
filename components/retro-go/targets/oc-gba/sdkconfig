@@ -68,12 +68,6 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
 CONFIG_COMPILER_FLOAT_LIB_FROM_RVFPLIB=y
 CONFIG_COMPILER_HIDE_PATHS_MACROS=y
-# Needed by the PICO-8 app: z8lua implements Lua's error handling with C++ throw, which is
-# what pcall() and every cart's runtime error path go through. With exceptions disabled
-# ESP-IDF links a __cxa_throw that aborts, so a cart with a bug would take the firmware down
-# instead of returning to the launcher. This is set per target rather than per app because
-# one sdkconfig serves them all.
-CONFIG_COMPILER_CXX_EXCEPTIONS=y
 
 #
 # FreeRTOS - Optimized for dual-core emulator

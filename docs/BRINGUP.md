@@ -418,7 +418,25 @@ SMS/GG/CV/MSX도 근접하지만, **SNES와 메가드라이브는 티어 A가 �
 `.gw` 롬은 MAME 롬셋에서 lcd-game-shrinker류 도구로 만든다. 이 프로젝트에서는 이미 만들어둔 것을
 `ganda-rpi`에서 가져왔다.
 
-### A11. 크래시 복구
+### A11. 새로 이식된 코어 4종 (2026-08-01)
+
+다른 세션이 이식한 것을 받아서 실기에 태웠다. 전부 돈다.
+
+| 코어 | 앱 | FPS | BUSY |
+|---|---|---|---|
+| SG-1000 | retro-core (smsplus) | 52.6~56.3 | ~50% |
+| Atari 2600 | stella-go | 55~58 | 45~58% |
+| Neo Geo Pocket Color | ngpocket-go | 42~44 | **100%** |
+| Watara Supervision | supervision-go | 32.4 | 22% |
+
+봐둘 것 둘.
+
+- **NGPC가 100%를 쓰면서 42fps다.** 여유가 없다. 화면이 붙으면 더 떨어진다.
+- **stella-go가 내부 RAM 76KB를 요청하는데 31KB밖에 없어서 PSRAM으로 떨어진다**
+  (`rg_alloc: CAPS not fully met!`). 지금도 56fps는 나오지만, 오늘 배운 대로 PSRAM에 놓인
+  뜨거운 데이터는 비싸다. 줄이거나 나눌 여지가 있다.
+
+### A12. 크래시 복구
 
 `RG_PANIC`을 일부러 한 번 일으켜서:
 
