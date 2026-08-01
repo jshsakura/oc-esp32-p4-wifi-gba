@@ -1319,6 +1319,26 @@ void rg_system_set_overclock(int level)
         original_tickRate = app.tickRate;
     app.tickRate = original_tickRate * (360.f / real_mhz);
 
+    // Believe the measurement, not the request.
+    //
+    // Measured on this board: the CPU PLL saturates around 429MHz. Ask for 480 and the
+    // divider is applied to 429 instead, so level 6 gives 429, level 5 gives 429*23/24 = 411,
+    // level 3 gives 429*21/22 = 409 -- each within a few percent of what was requested, and
+    // none of them what was requested. Below 300MHz it stops tracking too. What actually
+    // works is 300 to 400MHz, which is levels -3 to +2.
+    //
+    // The old code printed the requested number regardless, so "480Mhz applied" meant 429.
+    // An overclock nobody can trust is worse than not having one, hence a tight tolerance:
+    // 2% plus 2MHz covers the measurement's own jitter and nothing else.
+    int tolerance = target_freq / 50 + 2;
+    if (level != 0 && (real_mhz < target_freq - tolerance || real_mhz > target_freq + tolerance))
+    {
+        RG_LOGW("Overclock level %d asked for %dMhz but measured %dMhz -- refusing, back to stock",
+                level, target_freq, real_mhz);
+        rg_system_set_overclock(0);
+        return;
+    }
+
     app.overclock = level;
     app.frameskip = 1;
 

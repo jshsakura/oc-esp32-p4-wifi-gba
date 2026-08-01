@@ -462,6 +462,7 @@ void app_main(void)
         rg_storage_mkdir(RG_BASE_PATH_CACHE);
         rg_storage_mkdir(RG_BASE_PATH_CONFIG);
         try_migrate();
+
         // Does nothing unless /sd/retro-go/psram_exec_test is there to ask it to. Before the
         // splash, so a probe that faults does not do it behind a logo.
         rg_psram_exec_test();
