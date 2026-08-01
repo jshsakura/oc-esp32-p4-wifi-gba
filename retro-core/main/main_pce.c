@@ -220,7 +220,7 @@ void pce_main(void)
     free(palette);
 
     emulationPaused = true;
-    rg_task_create("pce_sound", &audioTask, NULL, 2 * 1024, RG_TASK_PRIORITY_2, 1);
+    rg_task_create("pce_sound", &audioTask, NULL, 4 * 1024, RG_TASK_PRIORITY_2, 1);
 
     InitPCE(app->sampleRate, true);
 
