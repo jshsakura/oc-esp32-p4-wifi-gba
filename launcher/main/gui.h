@@ -105,6 +105,7 @@ typedef struct tab_s {
     } status[2];
     bool initialized;
     bool enabled;
+    bool has_roms;
     void *arg;
     const char *navpath;
     listbox_t listbox;

@@ -358,6 +358,12 @@ static void tab_refresh(tab_t *tab, const char *selected)
     gui_resize_list(tab, items_count);
     gui_sort_list(tab);
 
+    // Hide this tab if the scan found no ROMs at all. has_roms is separate from
+    // the user's enabled/HideTab setting so the two never conflict: a tab that
+    // the user explicitly hid stays hidden, and a tab with no ROMs auto-hides
+    // but reappears the moment ROMs are added and the tab is re-initialised.
+    tab->has_roms = (app->files_count > 0);
+
     if (items_count == 0)
     {
         gui_resize_list(tab, 6);

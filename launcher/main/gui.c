@@ -77,6 +77,7 @@ tab_t *gui_add_tab(const char *name, const char *desc, void *arg, void *event_ha
     tab->event_handler = event_handler;
     tab->initialized = false;
     tab->enabled = !rg_settings_get_number(NS_APP, SETTING_HIDE_TAB(name), 0);
+    tab->has_roms = true; // default visible; per-system tabs clear this on scan
     tab->arg = arg;
     tab->listbox = (listbox_t){
         .items = calloc(10, sizeof(listbox_item_t)),

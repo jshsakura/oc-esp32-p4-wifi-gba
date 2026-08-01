@@ -319,7 +319,7 @@ static void retro_loop(void)
 
         int64_t start_time = rg_system_timer();
 
-        if (!tab->enabled && !change_tab)
+        if (!(tab->enabled && tab->has_roms) && !change_tab)
         {
             change_tab = 1;
         }
@@ -330,7 +330,7 @@ static void retro_loop(void)
             {
                 gui_event(TAB_LEAVE, tab);
                 tab = gui_set_current_tab(gui.selected_tab + change_tab);
-                for (int tabs = gui.tabs_count; !tab->enabled && --tabs > 0;)
+                for (int tabs = gui.tabs_count; !(tab->enabled && tab->has_roms) && --tabs > 0;)
                     tab = gui_set_current_tab(gui.selected_tab + change_tab);
                 change_tab = 0;
             }
