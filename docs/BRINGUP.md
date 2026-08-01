@@ -92,8 +92,14 @@ if (!rg_storage_exists(path)) {
 ### 0.4 로그 읽기
 
 ```sh
-python3 rg_tool.py --target oc-gba-devkit --port /dev/ttyACM0 monitor
+python3 rg_tool.py --target oc-gba-devkit --port /dev/ttyACM0 monitor   # 사람이 볼 때
+python3 tools/serial_capture.py 25 > /tmp/boot.log                      # 스크립트로 잴 때
 ```
+
+이 문서의 모든 수치는 두 번째 것으로 쟀다. `monitor`는 대화형이라 자동화가 안 된다.
+`serial_capture.py`는 esptool과 같은 방식으로 리셋하고 정해진 시간만큼 읽는다 — 빌드·플래시·측정을
+한 줄로 묶을 수 있고, **리셋을 걸 수 있다는 게 핵심**이다. 코어를 하나씩 자동 순회시킨 감사(A9)도
+런처가 매 부팅 다음 코어로 넘어가게 해놓고 이걸로 리셋만 반복한 것이다.
 
 - 개발보드에는 버튼 확장칩이 없어서 **0x20/0x21 NACK이 2초마다 정상적으로 찍힌다.** 걸러서 볼 것:
   `... | grep -v "0x2[01] failed"`
