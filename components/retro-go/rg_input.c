@@ -38,6 +38,16 @@ static volatile bool input_task_running = false;
 static volatile uint32_t gamepad_state = -1;
 static uint32_t gamepad_mapped = 0;
 static rg_battery_t battery_state = {0};
+// Per-source-key remap: key_remap[i] is the bitmask reported when physical key
+// (1<<i) is held. Identity by default. Applied in rg_input_read_gamepad, after
+// the debounce task and the VIRT chord detection, so remapping a physical key
+// never stops the MENU/OPTION chords from firing.
+static uint32_t key_remap[RG_KEY_COUNT];
+static void load_key_remap(void);
+// Idle backlight dimming state.
+static int64_t idle_last_input = 0;
+static bool idle_dimmed = false;
+static int idle_saved_backlight = 0;
 
 #define UPDATE_GLOBAL_MAP(keymap)                 \
     for (size_t i = 0; i < RG_COUNT(keymap); ++i) \
@@ -296,6 +306,27 @@ static void input_task(void *arg)
             }
             gamepad_state = local_gamepad_state;
             __sync_synchronize();
+
+            // Idle backlight dimming: after ~30s of no input, drop the backlight
+            // to a fraction of the user's level to save power; any key restores it.
+            // The dim is transient (rg_display_dim_backlight does not save), so the
+            // user's brightness setting is untouched.
+            int64_t now = rg_system_timer();
+            if (local_gamepad_state != 0)
+            {
+                idle_last_input = now;
+                if (idle_dimmed)
+                {
+                    rg_display_dim_backlight(idle_saved_backlight);
+                    idle_dimmed = false;
+                }
+            }
+            else if (!idle_dimmed && idle_last_input && (now - idle_last_input) > 30 * 1000000)
+            {
+                idle_saved_backlight = rg_display_get_backlight();
+                rg_display_dim_backlight(RG_MAX(idle_saved_backlight / 5, 5));
+                idle_dimmed = true;
+            }
         }
 
         if (rg_system_timer() >= next_battery_update)
@@ -432,6 +463,8 @@ void rg_input_init(void)
     }
 #endif
 
+    load_key_remap();
+
     rg_input_read_gamepad_raw(NULL);
 
     rg_task_create("rg_input", &input_task, NULL, 3 * 1024, RG_TASK_PRIORITY_5, RG_PERF_CORE_0);
@@ -454,7 +487,17 @@ bool rg_input_key_is_present(rg_key_t mask)
 uint32_t rg_input_read_gamepad(void)
 {
     __sync_synchronize();
-    return gamepad_state;
+    uint32_t state = gamepad_state;
+    // Apply the runtime remap at the logical layer. Each held source bit is
+    // replaced by its mapped target, so swaps, redirects, and even disabling a
+    // key (target 0) all work. MENU/OPTION keep identity unless explicitly set.
+    uint32_t remapped = 0;
+    for (int i = 0; i < RG_KEY_COUNT; i++)
+    {
+        if (state & (1u << i))
+            remapped |= key_remap[i];
+    }
+    return remapped;
 }
 
 bool rg_input_key_is_pressed(rg_key_t mask)
@@ -500,4 +543,88 @@ const char *rg_input_get_key_name(rg_key_t key)
     case RG_KEY_NONE: return "None";
     default: return "Unknown";
     }
+}
+
+// --- Runtime key remapping ---------------------------------------------------
+
+static int key_to_index(rg_key_t key)
+{
+    for (int i = 0; i < RG_KEY_COUNT; i++)
+        if (key == (rg_key_t)(1u << i))
+            return i;
+    return -1;
+}
+
+static void load_key_remap(void)
+{
+    for (int i = 0; i < RG_KEY_COUNT; i++)
+    {
+        rg_key_t key = (rg_key_t)(1u << i);
+        char setting[24];
+        snprintf(setting, sizeof(setting), "Keymap.%s", rg_input_get_key_name(key));
+        // Default is identity: target index == source index.
+        int target = rg_settings_get_number(NS_GLOBAL, setting, i);
+        key_remap[i] = (target >= 0 && target < RG_KEY_COUNT) ? (1u << target) : (1u << i);
+    }
+}
+
+void rg_input_set_key_remap(rg_key_t from, rg_key_t to)
+{
+    int from_idx = key_to_index(from);
+    int to_idx = key_to_index(to);
+    if (from_idx < 0 || to_idx < 0)
+        return;
+    key_remap[from_idx] = (1u << to_idx);
+    char setting[24];
+    snprintf(setting, sizeof(setting), "Keymap.%s", rg_input_get_key_name(from));
+    rg_settings_set_number(NS_GLOBAL, setting, to_idx);
+}
+
+rg_key_t rg_input_get_key_remap(rg_key_t from)
+{
+    int idx = key_to_index(from);
+    if (idx < 0)
+        return from;
+    return (rg_key_t)key_remap[idx];
+}
+
+void rg_input_reset_key_remap(void)
+{
+    for (int i = 0; i < RG_KEY_COUNT; i++)
+    {
+        rg_key_t key = (rg_key_t)(1u << i);
+        key_remap[i] = (1u << i);
+        char setting[24];
+        snprintf(setting, sizeof(setting), "Keymap.%s", rg_input_get_key_name(key));
+        rg_settings_set_number(NS_GLOBAL, setting, i);
+    }
+}
+
+rg_key_t rg_input_capture_key(int timeout_ms)
+{
+    int64_t expiration = timeout_ms < 0 ? INT64_MAX : (rg_system_timer() + (int64_t)timeout_ms * 1000);
+    // Read the pre-remap debounced state so we learn which physical key moved,
+    // not what it currently maps to.
+    __sync_synchronize();
+    while (gamepad_state != 0)
+    {
+        if (rg_system_timer() > expiration)
+            return RG_KEY_NONE;
+        rg_task_delay(10);
+        __sync_synchronize();
+    }
+    while (gamepad_state == 0)
+    {
+        if (rg_system_timer() > expiration)
+            return RG_KEY_NONE;
+        rg_task_delay(10);
+        __sync_synchronize();
+    }
+    // Return the first held key. A chord would show up as MENU/OPTION here, which
+    // the caller is expected to reject.
+    uint32_t s = gamepad_state;
+    for (int i = 0; i < RG_KEY_COUNT; i++)
+        if (s & (1u << i))
+            return (rg_key_t)(1u << i);
+    return RG_KEY_NONE;
 }

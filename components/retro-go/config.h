@@ -129,6 +129,13 @@
 #define RG_SCREEN_VISIBLE_AREA {0, 0, 0, 0}
 #endif
 
+// The scaling mode used when the user has never picked one. A target whose
+// panel makes integer scaling look right (e.g. oc-gba, where GBA 240x160 x3 =
+// 720x480 fits exactly) can override this to RG_DISPLAY_SCALING_INT.
+#ifndef RG_DISPLAY_SCALING_DEFAULT
+#define RG_DISPLAY_SCALING_DEFAULT RG_DISPLAY_SCALING_FIT
+#endif
+
 #ifndef RG_LANG_DEFAULT
 #define RG_LANG_DEFAULT RG_LANG_ZH
 #endif

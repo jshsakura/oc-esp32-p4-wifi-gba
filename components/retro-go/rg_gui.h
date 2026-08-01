@@ -125,6 +125,8 @@ rg_rect_t rg_gui_draw_text(int x_pos, int y_pos, int width, const char *text, //
                            rg_color_t color_fg, rg_color_t color_bg, uint32_t flags);
 void rg_gui_draw_rect(int x_pos, int y_pos, int width, int height, int border_size,
                       rg_color_t border_color, rg_color_t fill_color);
+void rg_gui_draw_rounded_rect(int x_pos, int y_pos, int width, int height, int radius,
+                              rg_color_t fill_color);
 void rg_gui_draw_icons(void);
 void rg_gui_draw_dialog(const char *header, const rg_gui_option_t *options, int sel);
 void rg_gui_draw_image(int x_pos, int y_pos, int width, int height, bool resample, const rg_image_t *img);

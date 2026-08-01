@@ -358,6 +358,12 @@ static void tab_refresh(tab_t *tab, const char *selected)
     gui_resize_list(tab, items_count);
     gui_sort_list(tab);
 
+    // Hide this tab if the scan found no ROMs at all. has_roms is separate from
+    // the user's enabled/HideTab setting so the two never conflict: a tab that
+    // the user explicitly hid stays hidden, and a tab with no ROMs auto-hides
+    // but reappears the moment ROMs are added and the tab is re-initialised.
+    tab->has_roms = (app->files_count > 0);
+
     if (items_count == 0)
     {
         gui_resize_list(tab, 6);
@@ -595,6 +601,7 @@ void application_show_file_menu(retro_file_t *file, bool advanced)
         {2, _("Delete save"), NULL, has_save || has_sram, NULL},
         RG_DIALOG_SEPARATOR,
         {4, _("Properties"), NULL, 1, NULL},
+        {5, _("Delete ROM"), NULL, 1, NULL},
         RG_DIALOG_END,
     };
 
@@ -633,6 +640,25 @@ void application_show_file_menu(retro_file_t *file, bool advanced)
 
     case 4:
         show_file_info(file);
+        break;
+
+    case 5:
+        if (rg_gui_confirm(_("Delete ROM?"), _("Also deletes saves and covers."), 0))
+        {
+            // Remove the ROM and all its associated files.
+            remove(rom_path);
+            if (has_sram)
+                remove(sram_path);
+            for (int s = 0; s < 4; s++)
+            {
+                remove(savestates->slots[s].file);
+                remove(savestates->slots[s].preview);
+            }
+            bookmark_remove(BOOK_TYPE_RECENT, file);
+            bookmark_remove(BOOK_TYPE_FAVORITE, file);
+            // Force the list to rebuild so the deleted entry disappears.
+            gui_invalidate();
+        }
         break;
 
     default:
@@ -682,16 +708,17 @@ void applications_init(void)
     application("Nintendo Gameboy Color", "gbc", "gbc gb zip", "retro-core", 0);
     application("Nintendo Gameboy Advance", "gba", "gba zip", "gbsp", 0);
     application("Nintendo Game & Watch", "gw", "gw", "retro-core", 0);
-    // application("Sega SG-1000", "sg1", "sms sg sg1", "retro-core", 0);
+    application("Sega SG-1000", "sg1", "sms sg sg1", "retro-core", 0);
     application("Sega Master System", "sms", "sms sg zip", "retro-core", 0);
     application("Sega Game Gear", "gg", "gg zip", "retro-core", 0);
     application("Sega Mega Drive", "md", "md gen bin zip", "gwenesis", 0);
     application("Coleco ColecoVision", "col", "col rom zip", "retro-core", 0);
     application("NEC PC Engine", "pce", "pce zip", "retro-core", 0);
     application("Atari Lynx", "lnx", "lnx zip", "retro-core", 64);
-    // application("Atari 2600", "a26", "a26 zip", "stella-go", 0);
-    // application("Neo Geo Pocket Color", "ngp", "ngp ngc zip", "ngpocket-go", 0);
+    application("Atari 2600", "a26", "a26 bin zip", "stella-go", 0);
+    application("Neo Geo Pocket Color", "ngp", "ngp ngc zip", "ngpocket-go", 0);
     application("DOOM", "doom", "wad zip", "prboom-go", 0);
+    application("Watara Supervision", "supervision", "sv bin zip", "supervision-go", 0);
     application("MSX", "msx", "rom mx1 mx2 dsk", "fmsx", 0);
     // Carts are either .p8 text or .p8.png, where the cart is steganographed into the pixels
     // of the label image -- so "png" here is a cart extension, not a cover.

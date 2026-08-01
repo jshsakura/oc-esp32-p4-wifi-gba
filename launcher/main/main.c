@@ -191,6 +191,63 @@ static rg_gui_event_t prebuild_cache_cb(rg_gui_option_t *option, rg_gui_event_t 
     return RG_DIALOG_VOID;
 }
 
+// Case-insensitive substring search across the current tab's games. OnionOS
+// ships a whole Search app for this; for retro-go a shoulder-key trigger plus a
+// results dialog covers the same need without a new app partition.
+static bool name_matches(const char *hay, const char *needle)
+{
+    if (!needle || !*needle)
+        return true;
+    size_t nl = strlen(needle);
+    for (; *hay; hay++)
+    {
+        if (!strncasecmp(hay, needle, nl))
+            return true;
+    }
+    return false;
+}
+
+static void do_search(tab_t *tab)
+{
+    if (!tab || !tab->listbox.length)
+        return;
+
+    char *query = rg_gui_input_str(_("Search"), _("Enter search text"), "");
+    if (!query || !*query)
+    {
+        free(query);
+        return;
+    }
+
+    #define SEARCH_MAX 48
+    rg_gui_option_t options[SEARCH_MAX + 1];
+    int n = 0;
+    for (int i = 0; i < tab->listbox.length && n < SEARCH_MAX; i++)
+    {
+        listbox_item_t *item = &tab->listbox.items[i];
+        if (!item->arg || !name_matches(item->text, query))
+            continue;
+        options[n].arg = (intptr_t)item->arg;
+        options[n].label = item->text;
+        options[n].value = NULL;
+        options[n].flags = RG_DIALOG_FLAG_NORMAL;
+        options[n].update_cb = NULL;
+        n++;
+    }
+    free(query);
+
+    if (n == 0)
+    {
+        rg_gui_alert(_("Search"), _("No matches found"));
+        return;
+    }
+    options[n] = (rg_gui_option_t){0};
+
+    intptr_t result = rg_gui_dialog(_("Search results"), options, 0);
+    if (result != (intptr_t)RG_DIALOG_CANCELLED && result != 0)
+        application_show_file_menu((retro_file_t *)result, false);
+}
+
 static void retro_loop(void)
 {
     tab_t *tab = NULL;
@@ -263,7 +320,7 @@ static void retro_loop(void)
 
         int64_t start_time = rg_system_timer();
 
-        if (!tab->enabled && !change_tab)
+        if (!(tab->enabled && tab->has_roms) && !change_tab)
         {
             change_tab = 1;
         }
@@ -274,7 +331,7 @@ static void retro_loop(void)
             {
                 gui_event(TAB_LEAVE, tab);
                 tab = gui_set_current_tab(gui.selected_tab + change_tab);
-                for (int tabs = gui.tabs_count; !tab->enabled && --tabs > 0;)
+                for (int tabs = gui.tabs_count; !(tab->enabled && tab->has_roms) && --tabs > 0;)
                     tab = gui_set_current_tab(gui.selected_tab + change_tab);
                 change_tab = 0;
             }
@@ -326,6 +383,11 @@ static void retro_loop(void)
                     gui_event(TAB_BACK, tab);
                 else
                     gui.browse = false;
+                redraw_pending = true;
+            }
+            else if (joystick == RG_KEY_L) {
+                // Shoulder L opens search across the current tab's games.
+                do_search(tab);
                 redraw_pending = true;
             }
         }

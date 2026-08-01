@@ -34,6 +34,7 @@ static const char *SETTING_SCALING = "DispScaling";
 static const char *SETTING_FILTER = "DispFilter";
 static const char *SETTING_ROTATION = "DispRotation";
 static const char *SETTING_BORDER = "DispBorder";
+static const char *SETTING_SCANLINE = "DispScanline";
 static const char *SETTING_CUSTOM_ZOOM = "DispCustomZoom";
 
 static void lcd_init(void);
@@ -205,6 +206,45 @@ static inline void write_update(const rg_surface_t *update)
             }
         }
 
+        // CRT scanline / mask effects. line_buffer holds big-endian 565, so the
+        // byte swap and mask mirror blend_pixels. Patterns:
+        //   H/H_STRONG: darken odd rows (classic CRT TV lines), 50% / 25%.
+        //   V:          darken odd columns (aperture grille / LCD look).
+        //   GRID:       darken where row or column is odd (pixel grid).
+        // H only touches half the rows; V and GRID touch every row, so they cost
+        // roughly twice as much -- still fine on the display core.
+        if (config.scanline != RG_DISPLAY_SCANLINE_OFF && need_update)
+        {
+            int batch_top = y - lines_to_copy;
+            int mode = config.scanline;
+            for (int i = 0; i < lines_to_copy; ++i)
+            {
+                int row_odd = (draw_top + batch_top + i) & 1;
+                bool do_row = (mode == RG_DISPLAY_SCANLINE_V) || (mode == RG_DISPLAY_SCANLINE_GRID) || row_odd;
+                if (!do_row)
+                    continue;
+                uint16_t *line = line_buffer + i * draw_width;
+                for (int x = 0; x < draw_width; ++x)
+                {
+                    bool dark;
+                    if (mode == RG_DISPLAY_SCANLINE_V)
+                        dark = (draw_left + x) & 1;
+                    else if (mode == RG_DISPLAY_SCANLINE_GRID)
+                        dark = row_odd || ((draw_left + x) & 1);
+                    else
+                        dark = true; // H / H_STRONG: whole odd row
+                    if (!dark)
+                        continue;
+                    unsigned p = (line[x] << 8) | (line[x] >> 8);
+                    if (mode == RG_DISPLAY_SCANLINE_H_STRONG)
+                        p = (p & 0xE79C) >> 2;   // quarter
+                    else
+                        p = (p & 0xF7DE) >> 1;   // half
+                    line[x] = (p << 8) | (p >> 8);
+                }
+            }
+        }
+
         if (need_update)
         {
             int left = display.screen.margins.left + draw_left;
@@ -258,6 +298,34 @@ static void update_viewport_scaling(void)
     {
         new_width = FLOAT_TO_INT(src_width * config.custom_zoom);
         new_height = FLOAT_TO_INT(src_height * config.custom_zoom);
+    }
+    else if (config.scaling == RG_DISPLAY_SCALING_INT)
+    {
+        // Largest integer factor that fits both axes -- every source pixel maps
+        // to an exact N×N block, so there is no fractional resampling and pixels
+        // stay razor-sharp. The price is letterboxing (e.g. GBA 240x160 x3 =
+        // 720x480 on an 800-wide panel leaves 40px bars), which the panel's
+        // shell opening usually hides.
+        int factor = RG_MIN(screen_width / src_width, screen_height / src_height);
+        if (factor < 1)
+            factor = 1;
+        new_width = src_width * factor;
+        new_height = src_height * factor;
+    }
+    else if (config.scaling == RG_DISPLAY_SCALING_4_3)
+    {
+        // Force a 4:3 output rectangle regardless of the source pixel aspect,
+        // then stretch the source into it. This is the CRT-correct look for
+        // systems like the NES/SNES/PCE whose square pixels were displayed at
+        // 4:3. On an 800x480 (5:3) panel this yields a 640x480 image centred
+        // with 80px side bars.
+        new_height = screen_height;
+        new_width = screen_height * 4 / 3;
+        if (new_width > screen_width)
+        {
+            new_width = screen_width;
+            new_height = screen_width * 3 / 4;
+        }
     }
 
     // Everything works better when we use even dimensions!
@@ -399,6 +467,19 @@ double rg_display_get_custom_zoom(void)
     return config.custom_zoom;
 }
 
+void rg_display_set_scanline(int mode)
+{
+    config.scanline = RG_MIN(RG_MAX(mode, 0), RG_DISPLAY_SCANLINE_COUNT - 1);
+    rg_settings_set_number(NS_APP, SETTING_SCANLINE, config.scanline);
+    // Force a full redraw so the effect applies to the current frame.
+    memset(screen_line_checksum, 0xFF, sizeof(screen_line_checksum));
+}
+
+int rg_display_get_scanline(void)
+{
+    return config.scanline;
+}
+
 void rg_display_set_filter(display_filter_t filter)
 {
     config.filter = RG_MIN(RG_MAX(0, filter), RG_DISPLAY_FILTER_COUNT - 1);
@@ -433,6 +514,12 @@ void rg_display_set_backlight(display_backlight_t percent)
 display_backlight_t rg_display_get_backlight(void)
 {
     return config.backlight;
+}
+
+void rg_display_dim_backlight(int percent)
+{
+    int dim = RG_MIN(RG_MAX(percent, RG_DISPLAY_BACKLIGHT_MIN), RG_DISPLAY_BACKLIGHT_MAX);
+    lcd_set_backlight(dim);
 }
 
 void rg_display_set_border(const char *filename)
@@ -597,11 +684,12 @@ void rg_display_init(void)
     // TO DO: We probably should call the setters to ensure valid values...
     config = (rg_display_config_t){
         .backlight = rg_settings_get_number(NS_GLOBAL, SETTING_BACKLIGHT, 80),
-        .scaling = rg_settings_get_number(NS_APP, SETTING_SCALING, RG_DISPLAY_SCALING_FIT),
+        .scaling = rg_settings_get_number(NS_APP, SETTING_SCALING, RG_DISPLAY_SCALING_DEFAULT),
         .filter = rg_settings_get_number(NS_APP, SETTING_FILTER, RG_DISPLAY_FILTER_BOTH),
         .rotation = rg_settings_get_number(NS_APP, SETTING_ROTATION, RG_DISPLAY_ROTATION_AUTO),
         .border_file = rg_settings_get_string(NS_APP, SETTING_BORDER, NULL),
         .custom_zoom = rg_settings_get_number(NS_APP, SETTING_CUSTOM_ZOOM, 1.0),
+        .scanline = rg_settings_get_number(NS_APP, SETTING_SCANLINE, 0),
     };
     display = (rg_display_t){
         .screen.real_width = RG_SCREEN_WIDTH,

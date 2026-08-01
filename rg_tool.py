@@ -15,7 +15,7 @@ DEFAULT_TARGET = os.getenv("RG_TOOL_TARGET", "esp32p4")
 DEFAULT_BAUD = os.getenv("RG_TOOL_BAUD", "1152000")
 DEFAULT_PORT = os.getenv("RG_TOOL_PORT", "COM3")
 # DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core")
-DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core gbsp gwenesis fmsx prboom-go fake08")
+DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core gbsp gwenesis fmsx prboom-go fake08 stella-go ngpocket-go supervision-go")
 DEFAULT_NO_NETWORKING = os.getenv("RG_TOOL_NO_NETWORKING", "0") == "1"
 PROJECT_NAME = os.getenv("PROJECT_NAME", "retro-go")
 PROJECT_VER = os.getenv("PROJECT_VER", "2.0")
@@ -29,6 +29,9 @@ PROJECT_APPS = {
   'fmsx':         [0, 0, 589824],
   'gbsp':         [0, 0, 851968],
   'fake08':       [0, 0, 983040],
+  'stella-go':    [0, 0, 851968],
+  'ngpocket-go':  [0, 0, 1114112],
+  'supervision-go': [0, 0, 589824],
 }
 # PROJECT_APPS = {}
 # for t in glob.glob("*/CMakeLists.txt"):

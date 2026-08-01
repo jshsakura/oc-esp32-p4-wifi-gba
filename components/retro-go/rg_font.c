@@ -86,10 +86,25 @@ static void load_fonts_from_storage(void)
 extern const uint8_t font_NotoKR14_data[];
 extern const size_t font_NotoKR14_data_size;
 
+// A 24px DejaVu Sans Bold for high-resolution panels (e.g. the oc-gba 800x480 target), where
+// the 15px built-in is too small to read comfortably. Covers ASCII plus the Latin-1 supplement
+// (190 glyphs) so accented ROM names still render. A target opts into it as its default via
+// RG_FONT_DEFAULT_NAME; it is only loaded when that macro is defined, so targets that do not
+// use it do not spend an external-font slot on it.
+extern const uint8_t font_DejaVu24_data[];
+extern const size_t font_DejaVu24_data_size;
+
 void rg_font_init(void)
 {
     memset(external_fonts, 0, sizeof(external_fonts));
     external_font_count = 0;
+    // Load the built-in faces first so they always get a slot and a stable
+    // index, regardless of how many user fonts are on the card. DejaVu24 is
+    // looked up by name (RG_FONT_DEFAULT_NAME) and is the oc-gba default, so it
+    // goes first; its combined index is then RG_FONT_BUILTIN_MAX no matter what.
+#ifdef RG_FONT_DEFAULT_NAME
+    rg_font_load_from_memory(font_DejaVu24_data, font_DejaVu24_data_size);
+#endif
     rg_font_load_from_memory(font_NotoKR14_data, font_NotoKR14_data_size);
     load_fonts_from_storage();
     RG_LOGI("Font module initialized (%d loaded)", external_font_count);

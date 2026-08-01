@@ -104,6 +104,23 @@ static int get_vertical_position(int y_pos, int height)
 void rg_gui_init(void)
 {
     rg_font_init();
+#ifdef RG_FONT_DEFAULT_NAME
+    // DejaVu24 was inserted as the first external font on this target, which shifts every
+    // external index saved before the change by one. Bump stored external selections once,
+    // BEFORE the language/font setup below touches FontType, so an auto-switched Korean
+    // face (saved at the new index) is not mistaken for a stale pre-migration value.
+    if (!rg_settings_get_number(NS_GLOBAL, "FontIdxMig", 0))
+    {
+        int saved = rg_settings_get_number(NS_GLOBAL, SETTING_FONTTYPE, RG_FONT_DEFAULT);
+        if (saved >= RG_FONT_BUILTIN_MAX)
+        {
+            rg_settings_set_number(NS_GLOBAL, SETTING_FONTTYPE, saved + 1);
+            rg_settings_commit();
+        }
+        rg_settings_set_number(NS_GLOBAL, "FontIdxMig", 1);
+        rg_settings_commit();
+    }
+#endif
     gui.screen_width = rg_display_get_width();
     gui.screen_height = rg_display_get_height();
     // FIXME: RG_SCREEN_SAFE_AREA being added on top of RG_SCREEN_VISIBLE_AREA might not be super intuitive
@@ -122,7 +139,29 @@ void rg_gui_init(void)
     }
     if (!rg_gui_set_language_id(lang_id))
         rg_gui_set_language_id(0);
-    if (!rg_gui_set_font(rg_settings_get_number(NS_GLOBAL, SETTING_FONTTYPE, RG_FONT_DEFAULT)))
+    // A target may name a preferred default face (e.g. a high-res one for a large panel)
+    // via RG_FONT_DEFAULT_NAME in its config.h. We only adopt it when the user has not
+    // picked a font of their own, so an explicit choice is never overridden on reboot.
+    int default_font = rg_settings_get_number(NS_GLOBAL, SETTING_FONTTYPE, RG_FONT_DEFAULT);
+#ifdef RG_FONT_DEFAULT_NAME
+    // Only adopt the target's preferred face when the user has never picked a
+    // font of their own. Checking existence (rather than value == default)
+    // tells "unset" apart from "explicitly chose the default index", so an
+    // explicit choice is never overridden on reboot.
+    if (!rg_settings_exists(NS_GLOBAL, SETTING_FONTTYPE))
+    {
+        for (int f = 0; f < rg_font_get_combined_count(); f++)
+        {
+            const char *name = rg_font_get_combined_name(f);
+            if (name && strcmp(name, RG_FONT_DEFAULT_NAME) == 0)
+            {
+                default_font = f;
+                break;
+            }
+        }
+    }
+#endif
+    if (!rg_gui_set_font(default_font))
         rg_gui_set_font(0);
     rg_gui_set_theme(rg_settings_get_string(NS_GLOBAL, SETTING_THEME, NULL));
     gui.initialized = true;
@@ -140,6 +179,31 @@ bool rg_gui_set_language_id(int index)
         {
             rg_gui_set_font(RG_FONT_LXGW_LITE);
             RG_LOGI("Auto-switched to Chinese font");
+        }
+
+        // Auto-switch to the Korean (Hangul) font when switching to Korean.
+        // NotoKR is a compiled-in external font, so look it up by name rather
+        // than hard-coding an index -- the same way a user-picked SD font would.
+        if (index == RG_LANG_KO)
+        {
+            const char *cur = rg_font_get_combined_name(gui.font_index);
+            if (!cur || strncmp(cur, "Noto", 4) != 0)
+            {
+                bool found = false;
+                for (int f = RG_FONT_BUILTIN_MAX; f < rg_font_get_combined_count(); f++)
+                {
+                    const char *name = rg_font_get_combined_name(f);
+                    if (name && strncmp(name, "Noto", 4) == 0)
+                    {
+                        rg_gui_set_font(f);
+                        RG_LOGI("Auto-switched to Korean font");
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                    RG_LOGW("Korean selected but no Noto font loaded; UI will show missing-glyph boxes");
+            }
         }
 
         return true;
@@ -190,7 +254,7 @@ bool rg_gui_set_theme(const char *theme_name)
         RG_LOGI("Using built-in theme!\n");
     }
 
-    gui.style.box_background = rg_gui_get_theme_color("dialog", "background", C_NAVY);
+    gui.style.box_background = rg_gui_get_theme_color("dialog", "background", C_BLACK);
     gui.style.box_header = rg_gui_get_theme_color("dialog", "header", C_WHITE);
     gui.style.box_border = rg_gui_get_theme_color("dialog", "border", C_DIM_GRAY);
     gui.style.item_standard = rg_gui_get_theme_color("dialog", "item_standard", C_WHITE);
@@ -535,6 +599,62 @@ void rg_gui_draw_rect(int x_pos, int y_pos, int width, int height, int border_si
     }
 }
 
+void rg_gui_draw_rounded_rect(int x_pos, int y_pos, int width, int height, int radius,
+                              rg_color_t fill_color)
+{
+    if (width <= 0 || height <= 0 || fill_color == C_NONE || fill_color == C_TRANSPARENT)
+        return;
+
+    x_pos = get_horizontal_position(x_pos, width);
+    y_pos = get_vertical_position(y_pos, height);
+
+    // Clip to the screen. This bounds width/height (and therefore radius and the
+    // r*r distance math below) to sane values for any caller, so the public API
+    // cannot overflow or draw off-screen.
+    if (x_pos < 0) { width += x_pos; x_pos = 0; }
+    if (y_pos < 0) { height += y_pos; y_pos = 0; }
+    width = RG_MIN(width, gui.screen_width - x_pos);
+    height = RG_MIN(height, gui.screen_height - y_pos);
+    if (width <= 0 || height <= 0)
+        return;
+
+    // Keep the radius sane: never larger than half the shorter side.
+    int max_radius = RG_MIN(width, height) / 2;
+    if (radius > max_radius)
+        radius = max_radius;
+    if (radius < 0)
+        radius = 0;
+
+    // Draw the bar as opaque horizontal spans, one per scanline near the corners
+    // and a single full-width block for the middle. This avoids C_TRANSPARENT
+    // masking entirely: rg_gui_copy_buffer only skips transparent pixels on the
+    // RAM-surface path, so a transparency-based rounded rect would render its
+    // corners as solid magenta on the direct-display path that dialogs use.
+    // Solid spans are correct on both paths.
+    int mid_h = height - radius * 2;
+    if (mid_h > 0)
+        rg_gui_draw_rect(x_pos, y_pos + radius, width, mid_h, 0, 0, fill_color);
+
+    if (radius == 0)
+        return; // the middle block already covered everything
+
+    int r = radius - 1;
+    int r2 = r * r;
+    for (int row = 0; row < radius; row++)
+    {
+        // Smallest horizontal inset at which the quarter circle includes the pixel.
+        int inset = 0;
+        while (inset < radius && (r - inset) * (r - inset) + (r - row) * (r - row) > r2)
+            inset++;
+        int span_w = width - inset * 2;
+        if (span_w > 0)
+        {
+            rg_gui_draw_rect(x_pos + inset, y_pos + row, span_w, 1, 0, 0, fill_color);
+            rg_gui_draw_rect(x_pos + inset, y_pos + height - 1 - row, span_w, 1, 0, 0, fill_color);
+        }
+    }
+}
+
 void rg_gui_draw_image(int x_pos, int y_pos, int width, int height, bool resample, const rg_image_t *img)
 {
     if (img && resample && (width && height) && (width != img->width || height != img->height))
@@ -785,14 +905,33 @@ void rg_gui_draw_dialog(const char *title, const rg_gui_option_t *options, int s
             color = gui.style.item_disabled;
 
         bool highlight = (options[i].flags & RG_DIALOG_FLAG_MODE_MASK) != RG_DIALOG_FLAG_SKIP && i == sel;
-        fg = highlight ? gui.style.box_background : color;
-        bg = highlight ? color : gui.style.box_background;
 
         if (y + row_height[i] >= box_y + box_height)
             break;
 
         if (options[i].flags == RG_DIALOG_FLAG_HIDDEN)
             continue;
+
+        // The highlighted row becomes a rounded bar in the item colour with the
+        // text drawn over it in the box colour -- the same inverted, rounded
+        // selection the launcher list uses, so the two surfaces read as one.
+        // Fill the row with the box colour first so the bar's transparent corners
+        // show the dialog background, not whatever was on screen behind the dialog.
+        int row_w = inner_width + row_padding_x * 2;
+        if (highlight)
+        {
+            rg_gui_draw_rect(x, y, row_w, row_height[i], 0, 0, gui.style.box_background);
+            if (color != C_TRANSPARENT)
+                rg_gui_draw_rounded_rect(x, y, row_w, row_height[i], RG_MAX(row_height[i] / 6, 2), color);
+        }
+
+        fg = highlight ? gui.style.box_background : color;
+        // The text background must be opaque (the bar colour), not transparent:
+        // rg_gui_copy_buffer only honours transparency on the RAM-surface path,
+        // so a transparent bg would render as magenta on the direct-display path
+        // dialogs use. The text is inset past the padding, so the opaque fill
+        // never reaches the bar's rounded corners.
+        bg = highlight ? color : gui.style.box_background;
 
         if (false && options[i].flags == RG_DIALOG_FLAG_SEPARATOR)
         {
@@ -803,7 +942,7 @@ void rg_gui_draw_dialog(const char *title, const rg_gui_option_t *options, int s
             rg_gui_draw_text(xx, yy, col1_width, options[i].label, fg, bg, 0);
             rg_gui_draw_text(xx + col1_width, yy, sep_width, ": ", fg, bg, 0);
             height = rg_gui_draw_text(xx + col1_width + sep_width, yy, col2_width, options[i].value, fg, bg, RG_TEXT_MULTILINE).height;
-            if ((height / font_height) >= 2) // Multiline value, must fill sep and label
+            if (!highlight && (height / font_height) >= 2) // Multiline value, must fill sep and label
                 rg_gui_draw_rect(xx, yy + font_height + 1, inner_width - col2_width, height - font_height, 0, 0, bg);
         }
         else
@@ -811,10 +950,15 @@ void rg_gui_draw_dialog(const char *title, const rg_gui_option_t *options, int s
             height = rg_gui_draw_text(xx, yy, inner_width, options[i].label, fg, bg, RG_TEXT_MULTILINE).height;
         }
 
-        rg_gui_draw_rect(x, yy, row_padding_x, height, 0, 0, bg);
-        rg_gui_draw_rect(xx + inner_width, yy, row_padding_x, height, 0, 0, bg);
-        rg_gui_draw_rect(x, y, inner_width + row_padding_x * 2, row_padding_y, 0, 0, bg);
-        rg_gui_draw_rect(x, yy + height, inner_width + row_padding_x * 2, row_padding_y, 0, 0, bg);
+        // The flat padding fill is only needed for unselected rows; the rounded
+        // bar already covers the highlighted row's padding.
+        if (!highlight)
+        {
+            rg_gui_draw_rect(x, yy, row_padding_x, height, 0, 0, bg);
+            rg_gui_draw_rect(xx + inner_width, yy, row_padding_x, height, 0, 0, bg);
+            rg_gui_draw_rect(x, y, row_w, row_padding_y, 0, 0, bg);
+            rg_gui_draw_rect(x, yy + height, row_w, row_padding_y, 0, 0, bg);
+        }
 
         y += height + row_padding_y * 2;
     }
@@ -1186,6 +1330,114 @@ void rg_gui_draw_virtual_keyboard(int x_pos, int y_pos, const rg_keyboard_layout
     }
 }
 
+// --- Hangul composition engine -------------------------------------------------
+// Composes compatibility jamo (U+3131-U+3163) typed on the on-screen keyboard
+// into Unicode Hangul syllables (U+AC00-U+D7A3) using the standard formula
+//   syllable = 0xAC00 + (L*21 + V)*28 + T
+// State machine handles L -> LV -> LVT. Compound jamo and jongseong migration
+// are out of scope for v1; the common single-jamo path covers most Korean input.
+
+static int jamo_to_choseong(uint32_t c)
+{
+    switch (c)
+    {
+    case 0x3131: return 0;  case 0x3132: return 1;  case 0x3134: return 2;
+    case 0x3137: return 3;  case 0x3138: return 4;  case 0x3139: return 5;
+    case 0x3141: return 6;  case 0x3142: return 7;  case 0x3143: return 8;
+    case 0x3145: return 9;  case 0x3146: return 10; case 0x3147: return 11;
+    case 0x3148: return 12; case 0x3149: return 13; case 0x314A: return 14;
+    case 0x314B: return 15; case 0x314C: return 16; case 0x314D: return 17;
+    case 0x314E: return 18;
+    default: return -1;
+    }
+}
+
+static int jamo_to_jungseong(uint32_t c)
+{
+    if (c >= 0x314F && c <= 0x3163)
+        return c - 0x314F; // ㅏ=0 ... ㅣ=20
+    return -1;
+}
+
+static int jamo_to_jongseong(uint32_t c)
+{
+    switch (c)
+    {
+    case 0x3131: return 1;  case 0x3132: return 2;  case 0x3134: return 4;
+    case 0x3137: return 7;  case 0x3139: return 8;  case 0x3141: return 16;
+    case 0x3142: return 17; case 0x3145: return 19; case 0x3146: return 20;
+    case 0x3147: return 21; case 0x3148: return 22; case 0x314A: return 23;
+    case 0x314B: return 24; case 0x314C: return 25; case 0x314D: return 26;
+    case 0x314E: return 27;
+    default: return 0; // not valid as a trailing consonant (e.g. ㄸ ㅃ ㅉ)
+    }
+}
+
+static struct { int l, v, t; } hangul_state = {-1, -1, 0};
+
+static void hangul_reset(void)
+{
+    hangul_state.l = -1;
+    hangul_state.v = -1;
+    hangul_state.t = 0;
+}
+
+static uint32_t hangul_syllable(void)
+{
+    if (hangul_state.l >= 0 && hangul_state.v >= 0)
+        return 0xAC00 + (hangul_state.l * 21 + hangul_state.v) * 28 + hangul_state.t;
+    return 0;
+}
+
+// Feed one jamo. Returns the codepoint to show, and sets *replace if it updates
+// the last buffer codepoint rather than appending a new one.
+static uint32_t hangul_feed(uint32_t jamo, bool *replace)
+{
+    *replace = false;
+    int ch = jamo_to_choseong(jamo);
+    int ju = jamo_to_jungseong(jamo);
+    int jo = jamo_to_jongseong(jamo);
+
+    if (ch >= 0)
+    {
+        // A consonant. If we are at LV and it can be a trailing consonant, add it as T.
+        if (hangul_state.l >= 0 && hangul_state.v >= 0 && hangul_state.t == 0 && jo > 0)
+        {
+            hangul_state.t = jo;
+            *replace = true;
+            return hangul_syllable();
+        }
+        // Otherwise start a new syllable with this consonant as the initial.
+        hangul_state.l = ch;
+        hangul_state.v = -1;
+        hangul_state.t = 0;
+        return jamo; // standalone consonant until a vowel arrives
+    }
+
+    if (ju >= 0)
+    {
+        if (hangul_state.l >= 0 && hangul_state.v < 0)
+        {
+            // L + V -> LV
+            hangul_state.v = ju;
+            *replace = true;
+            return hangul_syllable();
+        }
+        // No initial consonant (or already has a vowel): commit, standalone vowel.
+        hangul_state.l = -1;
+        hangul_state.v = ju;
+        hangul_state.t = 0;
+        return jamo;
+    }
+
+    return jamo; // not a jamo (e.g. space)
+}
+
+static bool layout_is_hangul(const rg_keyboard_layout_t *layout)
+{
+    return layout && (uint8_t)layout->layout[0] >= 0xEA; // Hangul jamo are 3-byte UTF-8 starting with 0xEA/0xE3
+}
+
 static const rg_keyboard_layout_t keyboard_layouts[] = {
     // Lowercase letters
     {
@@ -1216,6 +1468,17 @@ static const rg_keyboard_layout_t keyboard_layouts[] = {
         .columns = 10,
         .rows = 4,
         .label = "!@#",
+    },
+    // Hangul (Korean) jamo -- the composition engine in hangul_feed() turns
+    // these into syllables. Arranged: consonants, then vowels.
+    {
+        .layout = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅ"
+                    "ㅆㅇㅈㅉㅊㅋㅌㅍㅎ "
+                    "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘ"
+                    "ㅙㅚㅛㅜㅝㅟㅠㅡㅢㅣ",
+        .columns = 10,
+        .rows = 4,
+        .label = "가",
     }
 };
 
@@ -1336,14 +1599,41 @@ char *rg_gui_input_str(const char *title, const char *message, const char *defau
                     int key = 0;
                     for (int i = 0; i <= cursor_pos; ++i)
                         key = rg_utf8_decode(&layout_ptr);
-                    input_length += rg_utf8_encode(&input_buffer[input_length], key);
+
+                    if (layout_is_hangul(current_layout) && key != ' ')
+                    {
+                        // Route through the Hangul composition engine: it either
+                        // extends the in-progress syllable (replace last char) or
+                        // starts a new one (append).
+                        bool replace;
+                        uint32_t syllable = hangul_feed(key, &replace);
+                        if (replace && input_length > 0)
+                        {
+                            while (input_length > 0)
+                            {
+                                const char *ptr = &input_buffer[--input_length];
+                                if (rg_utf8_decode(&ptr) != -1)
+                                    break;
+                            }
+                        }
+                        input_length += rg_utf8_encode(&input_buffer[input_length], syllable);
+                    }
+                    else
+                    {
+                        // Space or non-Hangul: commit any open syllable first.
+                        if (layout_is_hangul(current_layout))
+                            hangul_reset();
+                        input_length += rg_utf8_encode(&input_buffer[input_length], key);
+                    }
                     input_buffer[input_length] = '\0';
                     redraw = true;
                 }
             }
             else if (joystick & RG_KEY_B)
             {
-                // Backspace
+                // Backspace. Reset the Hangul composer so the next jamo starts a
+                // fresh syllable rather than extending the deleted one.
+                hangul_reset();
                 while (input_length > 0)
                 {
                     // Rewind until we find a valid codepoint
@@ -1356,7 +1646,8 @@ char *rg_gui_input_str(const char *title, const char *message, const char *defau
             }
             else if (joystick & RG_KEY_SELECT)
             {
-                // Toggle between layouts (Shift/Symbols)
+                // Toggle between layouts (Shift/Symbols/Hangul)
+                hangul_reset();
                 layout_idx = (layout_idx + 1) % RG_COUNT(keyboard_layouts);
                 current_layout = &keyboard_layouts[layout_idx];
                 cursor_pos = 0;
@@ -1502,16 +1793,58 @@ static rg_gui_event_t filter_update_cb(rg_gui_option_t *option, rg_gui_event_t e
     return RG_DIALOG_VOID;
 }
 
+static rg_gui_event_t scanline_update_cb(rg_gui_option_t *option, rg_gui_event_t event)
+{
+    int mode = rg_display_get_scanline();
+
+    if (event == RG_DIALOG_PREV || event == RG_DIALOG_NEXT)
+    {
+        int max = RG_DISPLAY_SCANLINE_COUNT - 1;
+        mode = (event == RG_DIALOG_NEXT) ? (mode + 1) % (max + 1) : (mode + max) % (max + 1);
+        rg_display_set_scanline(mode);
+        return RG_DIALOG_REDRAW;
+    }
+
+    const char *labels[] = {_("Off"), _("Scanlines"), _("Scanlines+"), _("Aperture"), _("Grid")};
+    strcpy(option->value, labels[mode]);
+    return RG_DIALOG_VOID;
+}
+
+// 4:3 CRT-aspect correction is only right for systems whose square pixels were
+// displayed at 4:3 (NES/SNES/PCE/etc. in retro-core). The GBA is natively 3:2,
+// so offering 4:3 there just squashes the picture ~11% -- hide it for gbsp.
+static bool scaling_supported(int mode)
+{
+    if (mode == RG_DISPLAY_SCALING_4_3)
+    {
+        const rg_app_t *app = rg_system_get_app();
+        if (app && app->name && strcmp(app->name, "gbsp") == 0)
+            return false;
+    }
+    return true;
+}
+
 static rg_gui_event_t scaling_update_cb(rg_gui_option_t *option, rg_gui_event_t event)
 {
     int max = RG_DISPLAY_SCALING_COUNT - 1;
     int mode = rg_display_get_scaling();
     int prev_mode = mode;
 
-    if (event == RG_DIALOG_PREV && --mode < 0)
-        mode = max; // 0;
-    if (event == RG_DIALOG_NEXT && ++mode > max)
-        mode = 0; // max;
+    if (event == RG_DIALOG_PREV || event == RG_DIALOG_NEXT)
+    {
+        // Step through modes, skipping any this app does not support.
+        int step = (event == RG_DIALOG_NEXT) ? 1 : -1;
+        for (int i = 0; i < RG_DISPLAY_SCALING_COUNT; i++)
+        {
+            mode += step;
+            if (mode < 0)
+                mode = max;
+            if (mode > max)
+                mode = 0;
+            if (scaling_supported(mode))
+                break;
+        }
+    }
 
     if (mode != prev_mode)
     {
@@ -1527,6 +1860,10 @@ static rg_gui_event_t scaling_update_cb(rg_gui_option_t *option, rg_gui_event_t 
         strcpy(option->value, _("Full"));
     else if (mode == RG_DISPLAY_SCALING_ZOOM)
         strcpy(option->value, _("Zoom"));
+    else if (mode == RG_DISPLAY_SCALING_INT)
+        strcpy(option->value, _("Pixel-perfect"));
+    else if (mode == RG_DISPLAY_SCALING_4_3)
+        strcpy(option->value, _("4:3 (CRT)"));
 
     return RG_DIALOG_VOID;
 }
@@ -2027,6 +2364,75 @@ static rg_gui_event_t app_options_cb(rg_gui_option_t *option, rg_gui_event_t eve
     return RG_DIALOG_VOID;
 }
 
+// --- Button remapping submenu -----------------------------------------------
+
+static rg_gui_event_t remap_key_cb(rg_gui_option_t *option, rg_gui_event_t event)
+{
+    rg_key_t from = (rg_key_t)option->arg;
+    rg_key_t to = rg_input_get_key_remap(from);
+    strcpy(option->value, rg_input_get_key_name(to));
+
+    if (event == RG_DIALOG_ENTER)
+    {
+        // Prompt, then capture a physical key. MENU/OPTION are rejected so a
+        // user can never strand themselves out of the menu.
+        char prompt[80];
+        snprintf(prompt, sizeof(prompt), _("Press a key for %s..."), option->label);
+        rg_gui_draw_message("%s", prompt);
+        rg_key_t captured = rg_input_capture_key(6000);
+        if (captured != RG_KEY_NONE && captured != RG_KEY_MENU && captured != RG_KEY_OPTION)
+        {
+            rg_input_set_key_remap(from, captured);
+            strcpy(option->value, rg_input_get_key_name(captured));
+            rg_settings_commit();
+        }
+        return RG_DIALOG_REDRAW;
+    }
+    return RG_DIALOG_VOID;
+}
+
+static rg_gui_event_t remap_reset_cb(rg_gui_option_t *option, rg_gui_event_t event)
+{
+    if (event == RG_DIALOG_ENTER)
+    {
+        rg_input_reset_key_remap();
+        rg_settings_commit();
+        return RG_DIALOG_REDRAW;
+    }
+    strcpy(option->value, "");
+    return RG_DIALOG_VOID;
+}
+
+static rg_gui_event_t button_map_cb(rg_gui_option_t *option, rg_gui_event_t event)
+{
+    if (event != RG_DIALOG_ENTER)
+        return RG_DIALOG_VOID;
+
+    // One entry per physically-present key. MENU/OPTION are virtual chords, so
+    // they are never offered -- remapping them is meaningless and remapping a
+    // physical key never breaks the chord (it is detected before the remap).
+    rg_gui_option_t opts[RG_KEY_COUNT + 2];
+    int n = 0;
+    for (int i = 0; i < RG_KEY_COUNT; i++)
+    {
+        rg_key_t key = (rg_key_t)(1u << i);
+        if (!rg_input_key_is_present(key) || key == RG_KEY_MENU || key == RG_KEY_OPTION)
+            continue;
+        opts[n].arg = (intptr_t)key;
+        opts[n].label = rg_input_get_key_name(key);
+        opts[n].value = "-";
+        opts[n].flags = RG_DIALOG_FLAG_NORMAL;
+        opts[n].update_cb = &remap_key_cb;
+        n++;
+    }
+    opts[n++] = (rg_gui_option_t){0, _("Restore defaults"), "-", RG_DIALOG_FLAG_NORMAL, &remap_reset_cb};
+    opts[n] = (rg_gui_option_t){0};
+
+    rg_display_force_redraw();
+    rg_gui_dialog(_("Button map"), opts, 0);
+    return RG_DIALOG_REDRAW;
+}
+
 void rg_gui_options_menu(void)
 {
     rg_gui_option_t options[20] = {
@@ -2035,6 +2441,7 @@ void rg_gui_options_menu(void)
         #endif
         {0, _("Volume"),        "-", RG_DIALOG_FLAG_NORMAL, &volume_update_cb},
         {0, _("Audio out"),     "-", RG_DIALOG_FLAG_NORMAL, &audio_update_cb},
+        {0, _("Button map"),    NULL, RG_DIALOG_FLAG_NORMAL, &button_map_cb},
         RG_DIALOG_END,
     };
     const rg_gui_option_t misc_options[] = {
@@ -2056,6 +2463,7 @@ void rg_gui_options_menu(void)
         {0, _("Scaling"),       "-", RG_DIALOG_FLAG_NORMAL, &scaling_update_cb},
         {0, _("Factor"),        "-", RG_DIALOG_FLAG_HIDDEN, &custom_zoom_cb},
         {0, _("Filter"),        "-", RG_DIALOG_FLAG_NORMAL, &filter_update_cb},
+        {0, _("CRT Effect"),    "-", RG_DIALOG_FLAG_NORMAL, &scanline_update_cb},
         {0, _("Border"),        "-", RG_DIALOG_FLAG_NORMAL, &border_update_cb},
         {0, _("Speed"),         "-", RG_DIALOG_FLAG_NORMAL, &speedup_update_cb},
         {0, _("Auto-save"),     "-", RG_DIALOG_FLAG_NORMAL, &autosave_update_cb},
@@ -2243,7 +2651,10 @@ static rg_gui_event_t slot_select_cb(rg_gui_option_t *option, rg_gui_event_t eve
     if (event == RG_DIALOG_FOCUS_GAINED)
     {
         rg_image_t *preview = NULL;
-        rg_color_t color = C_BLUE;
+        // Slot-state border uses theme tones so the savestate screen matches the
+        // dark-minimal menu instead of bright blue/red. Used = selection colour,
+        // empty = disabled colour.
+        rg_color_t color = gui.style.scrollbar;
         size_t margin = 0; // TEXT_RECT("ABC", 0).height;
         size_t border = 3;
         char buffer[100];
@@ -2258,12 +2669,18 @@ static rg_gui_event_t slot_select_cb(rg_gui_option_t *option, rg_gui_event_t eve
         else
         {
             snprintf(buffer, sizeof(buffer), "Slot %d is empty", slot->id);
-            color = C_RED;
+            color = gui.style.item_disabled;
         }
-        rg_gui_draw_image(0, margin, gui.screen_width, gui.screen_height - margin * 2, true, preview);
+        // Draw the preview, or a plain theme-coloured fill when there is none.
+        // Falling through to rg_gui_draw_image(NULL) would paint a full-screen
+        // red "missing image" box, which clashes with the dark-minimal menu.
+        if (preview)
+            rg_gui_draw_image(0, margin, gui.screen_width, gui.screen_height - margin * 2, true, preview);
+        else
+            rg_gui_draw_rect(0, margin, gui.screen_width, gui.screen_height - margin * 2, 0, 0, gui.style.box_background);
         rg_gui_draw_rect(0, margin, gui.screen_width, gui.screen_height - margin * 2, border, color, C_NONE);
-        rg_gui_draw_rect(border, margin + border, gui.screen_width - border * 2, gui.font_height * 2 + 6, 0, C_BLACK, C_BLACK);
-        rg_gui_draw_text(border + 60, margin + border + 5, gui.screen_width - border * 2 - 120, buffer, C_WHITE, C_BLACK, RG_TEXT_ALIGN_CENTER|RG_TEXT_BIGGER|RG_TEXT_NO_PADDING);
+        rg_gui_draw_rect(border, margin + border, gui.screen_width - border * 2, gui.font_height * 2 + 6, 0, 0, gui.style.box_background);
+        rg_gui_draw_text(border + 60, margin + border + 5, gui.screen_width - border * 2 - 120, buffer, gui.style.box_header, gui.style.box_background, RG_TEXT_ALIGN_CENTER|RG_TEXT_BIGGER|RG_TEXT_NO_PADDING);
         rg_surface_free(preview);
     }
     else if (event == RG_DIALOG_ENTER)
@@ -2271,7 +2688,6 @@ static rg_gui_event_t slot_select_cb(rg_gui_option_t *option, rg_gui_event_t eve
         return RG_DIALOG_SELECT;
     }
     return RG_DIALOG_VOID;
-    #undef draw_status
 }
 
 int rg_gui_savestate_menu(const char *title, const char *rom_path)
@@ -2300,6 +2716,8 @@ void rg_gui_game_menu(void)
         {2000, _("Save & Quit"),     NULL, RG_DIALOG_FLAG_NORMAL, NULL},
         {3001, _("Load game"),       NULL, RG_DIALOG_FLAG_NORMAL, NULL},
         {3000, _("Reset"),           NULL, RG_DIALOG_FLAG_NORMAL, NULL},
+        {4000, _("Screenshot"),      NULL, RG_DIALOG_FLAG_NORMAL, NULL},
+        {8000, _("Sleep"),           NULL, RG_DIALOG_FLAG_NORMAL, NULL},
         #ifdef RG_ENABLE_NETPLAY
         {5000, _("Netplay"),         NULL, RG_DIALOG_FLAG_NORMAL, NULL},
         #endif
@@ -2331,6 +2749,15 @@ void rg_gui_game_menu(void)
         case 3001: if ((slot = rg_gui_savestate_menu(_("Load"), rom_path)) >= 0) rg_emu_load_state(slot); break;
         case 3002: rg_emu_reset(false); break;
         case 3003: rg_emu_reset(true); break;
+        case 4000: rg_emu_screenshot(RG_STORAGE_ROOT "/screenshot.png", 0, 0);
+                   rg_gui_alert(_("Screenshot"), _("Saved to /screenshot.png")); break;
+        case 8000: // Save the current state so the next boot resumes here, then
+                   // enter deep sleep (lowest power). On oc-gba the I2C buttons
+                   // cannot wake deep sleep, so this is effectively power-off-
+                   // with-resume: power cycle the device and it boots back here.
+                   rg_emu_save_state(0);
+                   rg_system_sleep();
+                   break;
     #ifdef RG_ENABLE_NETPLAY
         case 5000: rg_netplay_quick_start(); break;
     #endif

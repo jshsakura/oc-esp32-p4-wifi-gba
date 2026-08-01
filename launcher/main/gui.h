@@ -105,6 +105,7 @@ typedef struct tab_s {
     } status[2];
     bool initialized;
     bool enabled;
+    bool has_roms;
     void *arg;
     const char *navpath;
     listbox_t listbox;
@@ -113,6 +114,7 @@ typedef struct tab_s {
     rg_image_t *logo;
     rg_image_t *preview;
     int background_shade;
+    bool background_suppressed;
     gui_event_handler_t event_handler;
 } tab_t;
 
@@ -170,3 +172,4 @@ void gui_draw_status(tab_t *tab);
 void gui_draw_list(tab_t *tab);
 void gui_draw_tab_indicator(void);
 void gui_draw_preview(tab_t *tab);
+void gui_draw_playtime(tab_t *tab);

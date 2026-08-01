@@ -507,6 +507,76 @@ static const char *translations[][RG_LANG_MAX] =
         [RG_LANG_KO] = "사운드 출력",
     },
     {
+        [RG_LANG_EN] = "Button map",
+        [RG_LANG_ZH] = "按键映射",
+        [RG_LANG_KO] = "버튼 매핑",
+    },
+    {
+        [RG_LANG_EN] = "Restore defaults",
+        [RG_LANG_ZH] = "恢复默认",
+        [RG_LANG_KO] = "기본값 복원",
+    },
+    {
+        [RG_LANG_EN] = "Press a key for %s...",
+        [RG_LANG_ZH] = "请为 %s 按一个键...",
+        [RG_LANG_KO] = "%s 에 누를 키를 누르세요...",
+    },
+    {
+        [RG_LANG_EN] = "Search",
+        [RG_LANG_ZH] = "搜索",
+        [RG_LANG_KO] = "검색",
+    },
+    {
+        [RG_LANG_EN] = "Enter search text",
+        [RG_LANG_ZH] = "输入搜索文字",
+        [RG_LANG_KO] = "검색어 입력",
+    },
+    {
+        [RG_LANG_EN] = "Search results",
+        [RG_LANG_ZH] = "搜索结果",
+        [RG_LANG_KO] = "검색 결과",
+    },
+    {
+        [RG_LANG_EN] = "No matches found",
+        [RG_LANG_ZH] = "未找到匹配项",
+        [RG_LANG_KO] = "일치하는 항목 없음",
+    },
+    {
+        [RG_LANG_EN] = "GBA Color",
+        [RG_LANG_ZH] = "GBA 色彩",
+        [RG_LANG_KO] = "GBA 컬러",
+    },
+    {
+        [RG_LANG_EN] = "Screenshot",
+        [RG_LANG_ZH] = "截图",
+        [RG_LANG_KO] = "스크린샷",
+    },
+    {
+        [RG_LANG_EN] = "Saved to /screenshot.png",
+        [RG_LANG_ZH] = "已保存到 /screenshot.png",
+        [RG_LANG_KO] = "/screenshot.png 에 저장됨",
+    },
+    {
+        [RG_LANG_EN] = "Sleep",
+        [RG_LANG_ZH] = "休眠",
+        [RG_LANG_KO] = "절전",
+    },
+    {
+        [RG_LANG_EN] = "Delete ROM",
+        [RG_LANG_ZH] = "删除 ROM",
+        [RG_LANG_KO] = "ROM 삭제",
+    },
+    {
+        [RG_LANG_EN] = "Delete ROM?",
+        [RG_LANG_ZH] = "删除 ROM？",
+        [RG_LANG_KO] = "ROM을 삭제하시겠습니까?",
+    },
+    {
+        [RG_LANG_EN] = "Also deletes saves and covers.",
+        [RG_LANG_ZH] = "存档和封面也会被删除。",
+        [RG_LANG_KO] = "세이브와 커버도 함께 삭제됩니다.",
+    },
+    {
         [RG_LANG_EN] = "Font type",
         [RG_LANG_ZH] = "字体类型",
         [RG_LANG_KO] = "글꼴 종류",
@@ -547,6 +617,51 @@ static const char *translations[][RG_LANG_MAX] =
         [RG_LANG_EN] = "Filter",
         [RG_LANG_ZH] = "滤镜",
         [RG_LANG_KO] = "필터",
+    },
+    {
+        [RG_LANG_EN] = "CRT Effect",
+        [RG_LANG_ZH] = "CRT 扫描线",
+        [RG_LANG_KO] = "CRT 스캔라인",
+    },
+    {
+        [RG_LANG_EN] = "Subtle",
+        [RG_LANG_ZH] = "轻微",
+        [RG_LANG_KO] = "약하게",
+    },
+    {
+        [RG_LANG_EN] = "Strong",
+        [RG_LANG_ZH] = "强烈",
+        [RG_LANG_KO] = "강하게",
+    },
+    {
+        [RG_LANG_EN] = "Scanlines",
+        [RG_LANG_ZH] = "扫描线",
+        [RG_LANG_KO] = "스캔라인",
+    },
+    {
+        [RG_LANG_EN] = "Scanlines+",
+        [RG_LANG_ZH] = "扫描线+",
+        [RG_LANG_KO] = "스캔라인+",
+    },
+    {
+        [RG_LANG_EN] = "Aperture",
+        [RG_LANG_ZH] = "光栅",
+        [RG_LANG_KO] = "조리개",
+    },
+    {
+        [RG_LANG_EN] = "Grid",
+        [RG_LANG_ZH] = "网格",
+        [RG_LANG_KO] = "그리드",
+    },
+    {
+        [RG_LANG_EN] = "Pixel-perfect",
+        [RG_LANG_ZH] = "像素完美",
+        [RG_LANG_KO] = "픽셀 퍼펙트",
+    },
+    {
+        [RG_LANG_EN] = "4:3 (CRT)",
+        [RG_LANG_ZH] = "4:3 (CRT)",
+        [RG_LANG_KO] = "4:3 (CRT)",
     },
     {
         [RG_LANG_EN] = "Border",

@@ -9,6 +9,8 @@ typedef enum
     RG_DISPLAY_SCALING_FIT,     // Scale and preserve aspect ratio
     RG_DISPLAY_SCALING_FULL,    // Scale and stretch to fill screen
     RG_DISPLAY_SCALING_ZOOM,  // Custom zoom and preserve aspect ratio
+    RG_DISPLAY_SCALING_INT,   // Integer scaling: sharpest pixels, may letterbox
+    RG_DISPLAY_SCALING_4_3,   // Force 4:3 output (CRT-correct for NES/SNES/PCE)
     RG_DISPLAY_SCALING_COUNT
 } display_scaling_t;
 
@@ -50,6 +52,7 @@ typedef struct
     display_backlight_t backlight;
     char *border_file;
     double custom_zoom;
+    int scanline; // CRT effect strength: 0=off, 1=subtle (50%), 2=strong (25%)
 } rg_display_config_t;
 
 typedef struct
@@ -122,7 +125,22 @@ void rg_display_set_rotation(display_rotation_t rotation);
 display_rotation_t rg_display_get_rotation(void);
 void rg_display_set_backlight(display_backlight_t percent);
 display_backlight_t rg_display_get_backlight(void);
+// Set the hardware backlight without persisting to settings -- used for the
+// transient idle dim, so the user's chosen brightness is not overwritten.
+void rg_display_dim_backlight(int percent);
 void rg_display_set_border(const char *filename);
 char *rg_display_get_border(void);
 void rg_display_set_custom_zoom(double factor);
 double rg_display_get_custom_zoom(void);
+typedef enum
+{
+    RG_DISPLAY_SCANLINE_OFF = 0,
+    RG_DISPLAY_SCANLINE_H,       // Horizontal scanlines (CRT TV), 50%
+    RG_DISPLAY_SCANLINE_H_STRONG,// Horizontal scanlines, 25%
+    RG_DISPLAY_SCANLINE_V,       // Vertical aperture grille, 50%
+    RG_DISPLAY_SCANLINE_GRID,    // Horizontal + vertical pixel grid, 50%
+    RG_DISPLAY_SCANLINE_COUNT,
+} display_scanline_t;
+
+void rg_display_set_scanline(int mode);
+int rg_display_get_scanline(void);
