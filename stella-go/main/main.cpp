@@ -179,8 +179,16 @@ extern "C" void app_main(void)
     app = rg_system_init(sampleRate, &handlers, NULL);
 
     // Double-buffered RGB565 surfaces sized for the TIA's maximum output.
-    updates[0] = rg_surface_create(STELLA_MAX_WIDTH, STELLA_MAX_HEIGHT, RG_PIXEL_565_LE, MEM_FAST);
-    updates[1] = rg_surface_create(STELLA_MAX_WIDTH, STELLA_MAX_HEIGHT, RG_PIXEL_565_LE, MEM_FAST);
+    // 76.8KB each, and internal RAM has about 31KB free by the time this runs -- so the
+    // MEM_FAST these used to ask for was never granted. rg_alloc() loosened the caps and
+    // handed back PSRAM anyway, logging "CAPS not fully met!" (BRINGUP A11). Asking for
+    // PSRAM outright is the same placement without the failed probe or the alarming log.
+    //
+    // Worth knowing if this ever needs to be faster: one buffer fits inside the 128KB L2,
+    // the alternating pair does not. That points at single-buffering, the way ngpocket-go
+    // does it -- not back at MEM_FAST, which there is no room to honour.
+    updates[0] = rg_surface_create(STELLA_MAX_WIDTH, STELLA_MAX_HEIGHT, RG_PIXEL_565_LE, MEM_SLOW);
+    updates[1] = rg_surface_create(STELLA_MAX_WIDTH, STELLA_MAX_HEIGHT, RG_PIXEL_565_LE, MEM_SLOW);
     updates[0]->stride = STELLA_MAX_WIDTH * 2;
     updates[1]->stride = STELLA_MAX_WIDTH * 2;
     currentUpdate = updates[0];
