@@ -9,6 +9,16 @@
 #define AUDIO_SAMPLE_RATE (53267)
 #define AUDIO_BUFFER_LENGTH (AUDIO_SAMPLE_RATE / 60 + 1)
 
+// What rg_system_init() actually asks the codec for. Not AUDIO_SAMPLE_RATE and not a clean
+// divisor of it -- see the comment at the rg_system_init() call site in app_main() for why
+// (the ES8311 only accepts rates from its own coefficient table; 26633 wasn't in it and was
+// silently ignored while I2S clocked out samples at that nominal rate anyway). Named and
+// defined once, rather than left as the literal 32000 in two unrelated places, because that
+// is exactly how the output buffer below went out of sync with the resample ratio once
+// already: the buffer was sized for the previous rate pair and nobody had one symbol to grep
+// for when the rate changed.
+#define AUDIO_OUT_RATE (32000)
+
 // gwenesis_SN76489_run()/ym2612_run() advance their sample index by
 // (target-clock)/AUDIO_FREQ_DIVISOR every scanline (VDP_CYCLES_PER_LINE=3420,
 // AUDIO_FREQ_DIVISOR=1009, gwenesis_bus.h), so over a full frame the index
@@ -37,6 +47,25 @@ int sn76489_clock;
 int16_t gwenesis_ym2612_buffer[AUDIO_MAX_SAMPLES_PER_FRAME];
 int ym2612_index;
 int ym2612_clock;
+
+// Holds the downmixed/resampled output handed to rg_audio_submit(). See the long comment at
+// the call site (search AUDIO_OUT_RATE below) for what this holds and how it's filled.
+//
+// Sized for the worst case of AUDIO_MAX_SAMPLES_PER_FRAME (1056, PAL-clamped) input samples
+// at AUDIO_SAMPLE_RATE:AUDIO_OUT_RATE (53267:32000, ~1.6646:1) -- ceil(1056 * 32000 / 53267)
+// = 635 output frames, plus a few for the fixed-point accumulator's own rounding, not the 528
+// this used to be. 528 was `(AUDIO_MAX_SAMPLES_PER_FRAME + 1) / 2`, sized for a 2:1 downsample
+// (the ratio this file used before AUDIO_OUT_RATE existed); it was reused unchanged as the
+// resample loop's own bound (`while (audio_frames < RG_COUNT(gwenesis_audio_out))`, below)
+// when the ratio changed to 53267:32000, and 528 < 635 so it silently kept working -- kept
+// compiling, never wrote out of bounds, just quietly submitted less audio than a frame is
+// worth. Simulated the fixed-point accumulator exactly (Python) rather than trust the ratio's
+// float approximation: uncapped it produces 534 output frames for NTSC's ~888 input samples
+// and 635 for PAL-clamped input, so at 528 this was dropping about 6/534 (~1.1%) of every
+// NTSC frame's audio and about 106/635 (~17%) of every PAL frame's -- both silent, both
+// underfeeding the DAC by exactly the mechanism the frameskip/pacing investigation elsewhere
+// in this file is about, just a second, independent source of the same symptom.
+static rg_audio_frame_t gwenesis_audio_out[(AUDIO_MAX_SAMPLES_PER_FRAME * AUDIO_OUT_RATE) / AUDIO_SAMPLE_RATE + 4];
 
 static FILE *savestate_fp = NULL;
 static int savestate_errors = 0;
@@ -319,10 +348,23 @@ void app_main(void)
         .options = &options_handler,
     };
 
-    app = rg_system_init(AUDIO_SAMPLE_RATE / 2, &handlers, NULL);
+    // AUDIO_OUT_RATE (32000), not the YM2612's own 53267 nor half of it. The ES8311 derives its
+    // clocks from a coefficient table of standard rates and refuses anything outside it --
+    // asking for AUDIO_SAMPLE_RATE/2 (26633) got "Unable to configure sample rate 26633Hz with
+    // 6818048Hz MCLK" in the boot log while I2S went on shipping samples at that nominal rate
+    // regardless, so the codec played at some other actual speed and the two drifted apart
+    // continuously. That is what was audible on the speaker after the buffer and pacing fixes
+    // above: still wrong, just less. 32000 is in the table, and fmsx and stella-go already use
+    // it here, so AUDIO_OUT_RATE is defined next to AUDIO_SAMPLE_RATE above.
+    app = rg_system_init(AUDIO_OUT_RATE, &handlers, NULL);
 
     yfm_enabled = rg_settings_get_number(NS_APP, SETTING_YFM_EMULATION, 1);
-    sn76489_enabled = rg_settings_get_number(NS_APP, SETTING_SN76489_EMULATION, 0);
+    // Default on, like the FM chip beside it. It defaulted to 0, which meant the PSG never
+    // ran unless someone found the menu entry -- and the PSG is where a Mega Drive keeps its
+    // percussion and most of its sound effects, so the machine simply sounded wrong out of
+    // the box. Nothing in the history says why it was off; the submit path was also throwing
+    // its buffer away, so it made no audible difference either way until that was fixed.
+    sn76489_enabled = rg_settings_get_number(NS_APP, SETTING_SN76489_EMULATION, 1);
     z80_enabled = rg_settings_get_number(NS_APP, SETTING_Z80_EMULATION, 1);
 
     updates[0] = rg_surface_create(320, 241, RG_PIXEL_PAL565_BE, MEM_FAST);
@@ -543,9 +585,158 @@ void app_main(void)
 
         rg_system_tick(rg_system_timer() - startTime);
 
-        // TODO: Mix in gwenesis_sn76489_buffer
-        rg_audio_submit((void *)gwenesis_ym2612_buffer, AUDIO_BUFFER_LENGTH >> 1);
+        // gwenesis_ym2612_buffer and gwenesis_sn76489_buffer are both mono, produced at the real
+        // YM2612 rate (AUDIO_SAMPLE_RATE, 53267Hz for NTSC -- see ym2612_run()/YM2612Update() in
+        // sound/ym2612.c and gwenesis_SN76489_run()/_Update() in sound/gwenesis_sn76489.c, which
+        // each write one int16 per sample). rg_system_init() above asks the codec for AUDIO_OUT_RATE
+        // (32000), so this resamples 53267 -> 32000 (~1.6646 input samples per output sample, not a
+        // clean ratio) with a fixed-point box filter: each output sample is the mean of the run of
+        // input samples it covers, which resamples and low-pass filters in the same pass -- averaging
+        // is a legitimate anti-alias filter for a decimating ratio, not just a cheap stand-in for one.
+        //
+        // History, so the next person doesn't redo this investigation:
+        //  1. Originally rg_audio_submit() was handed gwenesis_ym2612_buffer directly and its count
+        //     was miscomputed (rg_audio_frame_t is {int16 left; int16 right;} counted in stereo
+        //     frames, not samples), so consecutive mono samples were read as one L/R frame each --
+        //     no anti-alias filter, and a fixed one-sample (~18.8us) offset between channels.
+        //  2. Fixed 2026-08-02 by switching to AUDIO_SAMPLE_RATE/2 (26633) and averaging adjacent
+        //     pairs, since 53267/26633 = 2.00004 is close enough to exactly 2:1 that a plain average
+        //     is a correct decimation filter for that ratio. Built and measured -- except the ES8311
+        //     codec rejects 26633 outright ("Unable to configure sample rate 26633Hz with 6818048Hz
+        //     MCLK" in the boot log, since it can only derive clocks from a coefficient table of
+        //     standard rates) and plays at some other actual rate while I2S keeps shipping samples
+        //     timed for 26633, so the two drift apart continuously. Still wrong, just less audibly so
+        //     than the original bug -- caught before it reached the user.
+        //  3. Moved to AUDIO_OUT_RATE (32000, in the ES8311's table -- fmsx/main/main.c and
+        //     stella-go/main/main.cpp already run at 32000), which is not a 2:1 or otherwise clean
+        //     ratio of 53267, hence the fixed-point resample below instead of a plain pairwise average.
+        //  4. gwenesis_sn76489_buffer (the PSG -- percussion and most sound effects on this machine)
+        //     was being synthesized into its own buffer every frame and never read; only the YM2612
+        //     reached rg_audio_submit(). Added to the mix here.
+        //
+        // Whether ym2612_index and sn76489_index address the same instant in each buffer (item 4
+        // depends on this) was checked, not assumed: gwenesis_SN76489_run() and ym2612_run() are
+        // called with the identical `target` argument at the identical points every scanline (below,
+        // and again for the GWENESIS_AUDIO_ACCURATE==1 sync and the core1_task_sound path), both
+        // reset to index=0/clock=0 together at the top of this loop, and both advance by the
+        // identical recurrence (index += (target-clock)/divisor) with the identical divisor --
+        // gwenesis_SN76489_Init() (gwenesis_bus.c) is called with AUDIO_FREQ_DIVISOR, and
+        // YM2612Config() sets ym2612.divisor = AUDIO_FREQ_DIVISOR too (ym2612.c). Same divisor, same
+        // inputs, same starting state -> the two index sequences are identical by construction, not
+        // merely close, so `i` addresses the same instant in both buffers. This does not hold when
+        // SN76489 is disabled: sn76489_clock is set to 0x1000000 below, which pins sn76489_index at 0
+        // all frame, and the `i < sn76489_index` guard below already handles that (PSG contributes 0
+        // past index 0 rather than reading stale data).
+        //
+        // sn76489_enabled defaults to *off* (SETTING_SN76489_EMULATION's fallback below is 0, unlike
+        // yfm_enabled's 1) -- on a fresh settings file, or any save from before this option existed,
+        // this mixing code runs and finds sn76489_index pinned at 0 all frame, contributing nothing.
+        // The PSG-is-missing symptom this change targets will still reproduce until that default (or
+        // the user's saved setting) is flipped on; the option already exists ("SN76489 audio" in
+        // options_handler below), it is just off by default. Flagged rather than changed here --
+        // whether it defaults off on purpose (it predates this change; the earlier state of this file
+        // had the same fallback while the PSG buffer was going unread, which is at least consistent
+        // with "off" being intentional at the time) is a product decision for whoever ships this, not
+        // a mechanical bug -- but shipping today's change without addressing it will not fix what the
+        // user is hearing.
+        //
+        // Weighting: gwenesis_sn76489_buffer is halved before mixing. No documented relative level
+        // between the YM2612 and SN76489 outputs exists anywhere in this gwenesis core (checked
+        // sound/gwenesis_sn76489.c, sound/ym2612.c, bus/gwenesis_bus.c -- the only per-chip level
+        // tables are each chip's own internal per-channel attenuation, nothing relating one chip's
+        // output scale to the other's). By the numbers that do exist: SN76489's raw per-sample sum
+        // tops out around PSG_MAX_VOLUME_MAX*3 + noise-doubled PSG_MAX_VOLUME_MAX*2 =~ 15,500
+        // (gwenesis_sn76489.c), well inside int16 range; YM2612's raw sum can reach 6*8192 =~ 49,152
+        // (six channels each clamped to the 14-bit accumulator range in ym2612.c's YM2612Update, then
+        // stored to an int16 buffer with no clamp of its own) before this file's clamp is ever applied
+        // -- FM alone can already want more than full scale. Given that, halving the PSG is not
+        // obviously the safer choice for headroom; it's the FM side that can dominate. With no
+        // reference to defer to, this is a listening call, and the point of wiring up the speaker was
+        // to be able to make it: leaving PSG at half weight for now as the more conservative starting
+        // guess (won't drown out FM on the first listen), but this constant should move once someone
+        // has actually heard it, not stay because a different port used it.
+        //
+        // Clipping: summed and averaged in int32 (`sum`, `mixed`), clamped to int16 range only once,
+        // after the divide -- clamping the raw per-sample inputs before summing would be the wrong
+        // order (it would clip twice and distort the average); clamping the finished average once is
+        // correct as written. Overflow before the divide was checked, not assumed: each term is at
+        // most one int16 YM sample (+/-32768) plus one halved int16 SN sample (+/-16384), and the
+        // fixed-point step for 53267:32000 (~1.6646) means the accumulated run per output sample (`n`
+        // below) is 1 or 2 input samples, never more -- worst-case sum is ~2*49152 =~ 98,304, nowhere
+        // near int32's ~2.1 billion range. No overflow risk at this ratio and these sample widths.
+        //
+        // gwenesis_audio_out[] is sized in its own declaration comment above for this loop's actual
+        // worst case (635 output frames, not the 528 a stale 2:1-ratio sizing would give) -- verified
+        // by simulating this exact fixed-point accumulator, not by trusting the float ratio.
+        const uint32_t step = ((uint32_t)AUDIO_SAMPLE_RATE << 16) / AUDIO_OUT_RATE;
+        int audio_frames = 0;
+        uint32_t pos = 0;
+        while (audio_frames < (int)RG_COUNT(gwenesis_audio_out))
+        {
+            uint32_t next = pos + step;
+            int from = pos >> 16, to = next >> 16;
+            if (to > ym2612_index)
+                break;
+            int32_t sum = 0, n = 0;
+            for (int i = from; i < to; ++i, ++n)
+                sum += gwenesis_ym2612_buffer[i] + (i < sn76489_index ? gwenesis_sn76489_buffer[i] / 2 : 0);
+            int32_t mixed = n ? sum / n : 0;
+            if (mixed > 32767) mixed = 32767;
+            else if (mixed < -32768) mixed = -32768;
+            int16_t sample = (int16_t)mixed;
+            gwenesis_audio_out[audio_frames].left = sample;
+            gwenesis_audio_out[audio_frames].right = sample;
+            ++audio_frames;
+            pos = next;
+        }
+        rg_audio_submit(gwenesis_audio_out, audio_frames);
 
+        // Investigated 2026-08-02 alongside the audio rate fix above, because the reported symptom
+        // ("드르르륵", a periodic rattle rather than a continuous distortion) pointed at underfeeding
+        // the DAC, not at the channel-interleaving bug fixed above -- that bug is continuous and
+        // frame-independent, so it can't produce a periodic artifact on its own. Recorded here rather
+        // than changed, because every piece of it lives outside this file:
+        //
+        // 1. The debug line ("FPS:57 (43+0+14)" at "BUSY:66%") undercounts busy time. rg_system_tick()
+        //    is called (above, before this audio submit) with an elapsed time captured *before* this
+        //    frame's rg_audio_submit() runs, so whatever rg_audio_submit() -> driver_submit() ->
+        //    i2s_channel_write() (components/retro-go/drivers/audio/i2s.c) spends blocked for a free
+        //    DMA descriptor is real wall-clock time this frame took, but is invisible to statistics.
+        //    busyPercent (components/retro-go/rg_system.c, update_statistics()). The "34% idle" the
+        //    log implies is largely this blocking wait, not spare CPU.
+        // 2. That blocking wait is also the loop's de facto pacer: the codec drains the I2S ring at a
+        //    fixed real-time rate regardless of what the CPU is doing, so i2s_channel_write() (1000ms
+        //    timeout, a real FreeRTOS block, not a spin) only returns once there's room, which in
+        //    steady state paces this loop to roughly real time on its own -- no separate vsync/audio
+        //    sync call was written for it because the blocking write already behaves like one.
+        // 3. driver_submit()'s local staging buffer is only 180 rg_audio_frame_t (matching the 4x180
+        //    DMA descriptor config passed to i2s_new_channel()), so a submission this size (~534
+        //    frames/emulated-frame for NTSC at the current 53267->32000 resample, was ~444 at the
+        //    previous 26633 target) still splits into three separate i2s_channel_write() calls
+        //    (180+180+174 now, was 180+180+84) instead of one. Three blocking round trips instead of
+        //    one, each with its own FreeRTOS wake latency, was a plausible source of the ~0.87ms/frame
+        //    overshoot (17.54ms actual vs. 16.67ms ideal at 60fps) measured against the FPS:57,
+        //    BUSY:66% figures quoted above -- those figures were captured before AUDIO_OUT_RATE moved
+        //    to 32000 and before the PSG mix was added, both of which change what runs in this window,
+        //    so they're recorded here as the reasoning that was verified then, not re-verified against
+        //    this exact build. The mechanism (three round trips instead of one) is unchanged by either
+        //    of those edits and so is still the leading suspect, but the resulting FPS/shortfall number
+        //    should be re-measured on hardware against this version rather than assumed to still be 57.
+        // 4. Separately, `if (app->frameskip > 0) skipFrames = app->frameskip;` just below unconditionally
+        //    re-arms the skip counter every time it reaches 0 whenever app->frameskip is nonzero (2 by
+        //    default, set above) -- it does not consult `elapsed` or `slowFrame` in that case, so this
+        //    core skips 2 of every 3 frames' *rendering* by fixed ratio regardless of how much headroom
+        //    the previous frame actually had. This affects video (frames drawn), not audio (submitted
+        //    every iteration regardless of drawFrame) or the loop rate itself, so it does not explain the
+        //    57fps/previous-26,633Hz mismatch above, but it is worth knowing it's there.
+        //
+        // None of (1)-(4) are specific to gwenesis: the exact skipFrames pattern in (4) is duplicated,
+        // apparently copy-pasted, verbatim in wswan-go, vb-go, retro-core's main_sms/gbc/pce/lynx/nes/snes,
+        // pkmini-go, stella-go, and supervision-go's main loops, and (1)-(3) live in shared rg_system.c /
+        // rg_audio.c / drivers/audio/i2s.c that every core links against. Fixing any of it here would fix
+        // it for gwenesis alone and leave the other ports with the identical symptom; left unpatched on
+        // purpose pending a framework-level decision, per instruction not to patch one app around a
+        // question that paces every core on this device.
         if (skipFrames == 0)
         {
             int elapsed = rg_system_timer() - startTime;

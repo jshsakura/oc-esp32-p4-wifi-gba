@@ -154,7 +154,13 @@ static bool driver_deinit(void)
 static bool driver_submit(const rg_audio_frame_t *frames, size_t count)
 {
     float volume = state.muted ? 0.f : (state.volume * 0.01f);
-    rg_audio_frame_t buffer[180];
+    // One frame's worth of audio in one go. At 180 this staged buffer was smaller than what
+    // a core submits per video frame -- a Mega Drive frame is 444 -- so each submission
+    // became three i2s_channel_write() calls, and that call genuinely blocks until the DMA
+    // ring has room. Three waits per frame instead of one cost about 0.9ms of the 16.6ms
+    // budget, which is most of the 5% by which the codec was being underfed, and an underfed
+    // codec repeats its last descriptor: the periodic rattle heard on the speaker.
+    rg_audio_frame_t buffer[1024];
     size_t written = 0;
     size_t pos = 0;
 
