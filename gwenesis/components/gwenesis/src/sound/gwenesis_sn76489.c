@@ -206,11 +206,24 @@ static inline void gwenesis_SN76489_Update(INT16 *buffer, int length)
 /* SN76589 execution */
 extern int scan_line;
 void gwenesis_SN76489_run(int target) {
- 
+
 if ( sn76489_clock >= target) return;
 
   int sn76489_prev_index = sn76489_index;
   sn76489_index += (target-sn76489_clock) / gwenesis_SN76489.divisor;
+  /* gwenesis_sn76489_buffer is GWENESIS_AUDIO_BUFFER_LENGTH_PAL samples (see
+   * main.c) but a run of scanlines that outpaces the frame reset (e.g. two
+   * frames' worth of catch-up processed before sn76489_index is zeroed) can
+   * still push the index past that. Clamp rather than let
+   * gwenesis_SN76489_Update() write past the buffer into
+   * sn76489_index/sn76489_clock/gwenesis_ym2612_buffer, which sit right
+   * after it in memory -- that corruption is what was cascading into wild
+   * writes on subsequent calls. */
+  if (sn76489_index > GWENESIS_AUDIO_BUFFER_LENGTH_PAL) {
+    static int warned = 0;
+    if (!warned) { printf("gwenesis_SN76489_run: index %d clamped to %d\n", sn76489_index, GWENESIS_AUDIO_BUFFER_LENGTH_PAL); warned = 1; }
+    sn76489_index = GWENESIS_AUDIO_BUFFER_LENGTH_PAL;
+  }
   if (sn76489_index > sn76489_prev_index) {
     gwenesis_SN76489_Update(gwenesis_sn76489_buffer + sn76489_prev_index, sn76489_index-sn76489_prev_index);
     sn76489_clock = sn76489_index*gwenesis_SN76489.divisor;

@@ -9,15 +9,32 @@
 #define AUDIO_SAMPLE_RATE (53267)
 #define AUDIO_BUFFER_LENGTH (AUDIO_SAMPLE_RATE / 60 + 1)
 
+// gwenesis_SN76489_run()/ym2612_run() advance their sample index by
+// (target-clock)/AUDIO_FREQ_DIVISOR every scanline (VDP_CYCLES_PER_LINE=3420,
+// AUDIO_FREQ_DIVISOR=1009, gwenesis_bus.h), so over a full frame the index
+// grows by roughly lines_per_frame*3420/1009. For NTSC (262 lines) that is
+// ~888.0 -- exactly AUDIO_BUFFER_LENGTH, i.e. zero margin -- and for PAL (313
+// lines, LINES_PER_FRAME_PAL) it is ~1061, which overflows an
+// AUDIO_BUFFER_LENGTH-sized (888) buffer by ~173 samples/346 bytes every
+// single frame. gwenesis_bus.h already defines the correct PAL-safe capacity
+// as GWENESIS_AUDIO_BUFFER_LENGTH_PAL (1056) but main.c never used it -- the
+// buffers here were sized off the NTSC-only AUDIO_BUFFER_LENGTH instead.
+// These arrays are immediately followed by sn76489_index/sn76489_clock and
+// ym2612_index/ym2612_clock, so an overflow here is positioned to corrupt
+// exactly the state that computes the *next* overflow's size, i.e. it can
+// cascade into a wild write. This is independent of gwenesis/main/main.c's
+// core1_task_sound (queued vs. direct-call audio) -- it exists in both.
+#define AUDIO_MAX_SAMPLES_PER_FRAME GWENESIS_AUDIO_BUFFER_LENGTH_PAL
+
 extern unsigned char* VRAM;
 extern int zclk;
 int system_clock;
 int scan_line;
 
-int16_t gwenesis_sn76489_buffer[AUDIO_BUFFER_LENGTH];
+int16_t gwenesis_sn76489_buffer[AUDIO_MAX_SAMPLES_PER_FRAME];
 int sn76489_index;
 int sn76489_clock;
-int16_t gwenesis_ym2612_buffer[AUDIO_BUFFER_LENGTH];
+int16_t gwenesis_ym2612_buffer[AUDIO_MAX_SAMPLES_PER_FRAME];
 int ym2612_index;
 int ym2612_clock;
 
@@ -35,7 +52,32 @@ static rg_app_t *app;
 #ifdef USE_CORE1_TASK
 static rg_task_t *core1_task_handle;
 static bool core1_task_rendering = false;
-static bool core1_task_sound = true;
+// Measured 2026-08-02, same ROM, same flash, only this line different:
+//   core1_task_sound = true  (the old default): 5-7 fps,   BUSY 100%
+//   core1_task_sound = false                  : 56-59 fps, BUSY 72-74%
+// A ~10x difference from one flag. Root cause: gwenesis's core1_task and
+// retro-go's own display task (rg_display.c's "rg_display", started by
+// every app, not just this one) are both created at RG_TASK_PRIORITY_6
+// pinned to core 1 (rg_display.c:1002). They are equal priority, so
+// FreeRTOS only time-slices between them at a tick boundary
+// (configUSE_TIME_SLICING=1, CONFIG_FREERTOS_HZ=100 -> 10ms/tick) rather
+// than preempting immediately -- becoming ready doesn't mean becoming
+// scheduled. With core1_task_sound=true, main.c's scanline loop below
+// does a blocking rg_task_send() to core1_task on a depth-1 queue roughly
+// 262 times a frame; every one of those that lands while rg_display is
+// mid-blit (12ms+ for this system per BRINGUP.md's A13 table) has to wait
+// out that same 10ms tick window instead of being scheduled immediately,
+// and there are more than enough of those per frame to turn a 16.6ms
+// frame budget into 150-200ms. This is not gwenesis-specific: retro-core's
+// snes9x audio task is created the same way (main_snes.c:460, also
+// RG_TASK_PRIORITY_6 pinned to core 1), so it likely pays the same tax.
+// Defaulting to false until that framework-level priority collision is
+// addressed properly (components/retro-go, not here). The in-game "Sound
+// on core 1" option still flips this at runtime for testing -- it no
+// longer crashes in either position (see the ROM-header and 24-bit
+// address-mask fixes elsewhere in this tree from the same investigation),
+// it's just slow when on, and now you know why.
+static bool core1_task_sound = false;
 #endif
 
 static const char *SETTING_YFM_EMULATION = "yfm_enable";
@@ -299,7 +341,17 @@ void app_main(void)
     }
 
     RG_LOGI("load_cartridge(%p, %d)\n", rom_data, rom_size);
-    load_cartridge(rom_data, rom_size);
+    if (!load_cartridge(rom_data, rom_size))
+    {
+        // load_cartridge() already printed why (missing SEGA signature,
+        // reset vector out of range, etc -- see gwenesis_rom_looks_valid()
+        // in gwenesis_bus.c). Refuse to run it rather than execute
+        // whatever garbage sits at the wrong offsets: that is exactly how
+        // a 512-byte copier header ahead of the ROM data produced "3-4 fps"
+        // that was actually the 68000 running noise from its very first
+        // fetch, not a performance bug.
+        rg_system_rom_load_failed(_("ROM header invalid (bad or unhandled copier header?)"));
+    }
     // free(rom_data); // load_cartridge takes ownership
 
     RG_LOGI("power_on()\n");

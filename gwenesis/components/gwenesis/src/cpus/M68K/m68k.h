@@ -153,10 +153,17 @@
 
 extern unsigned char *ROM_DATA;
 extern unsigned char M68K_RAM[];
+/* Next-power-of-two-minus-one bound on the loaded cartridge size, computed
+ * once in load_cartridge() (gwenesis_bus.c). See its declaration there for
+ * why: without it, FETCHnROM indexes ROM_DATA (a plain pointer to whatever
+ * few-hundred-KB buffer this specific ROM's file read allocated) directly
+ * by the full 0..MAX_ROM_SIZE (8MB) nominal ROM window, which reads far
+ * past the actual allocation for any ROM smaller than 8MB. */
+extern unsigned int gwenesis_rom_mask;
 
-#define FETCH8ROM(A) ((ROM_DATA[((A) ^ 1)]))
-#define FETCH16ROM(A) ((*(unsigned short *)&ROM_DATA[(A)]))
-#define FETCH32ROM(A) ( (*(unsigned int *)&ROM_DATA[(A)] << 16) | (*(unsigned int *)&ROM_DATA[(A)] >> 16) )
+#define FETCH8ROM(A) ((ROM_DATA[(((A) & gwenesis_rom_mask) ^ 1)]))
+#define FETCH16ROM(A) ((*(unsigned short *)&ROM_DATA[(A) & gwenesis_rom_mask]))
+#define FETCH32ROM(A) ( (*(unsigned int *)&ROM_DATA[(A) & gwenesis_rom_mask] << 16) | (*(unsigned int *)&ROM_DATA[(A) & gwenesis_rom_mask] >> 16) )
 
 #define FETCH8RAM(A) ((M68K_RAM[(A ^ 1) & 0xFFFF]))
 #define FETCH16RAM(A) ((*(unsigned short *)&M68K_RAM[(A)&0XFFFF]))
@@ -166,26 +173,100 @@ extern unsigned char M68K_RAM[];
 #define WRITE16RAM(A, V) ((*(unsigned short *)&M68K_RAM[(A)&0XFFFF] = (V)))
 #define WRITE32RAM(A, V) ((*(unsigned int *)&M68K_RAM[(A)&0XFFFF] =( ((V) << 16) | ((V) >> 16) ) ))
 
-#define m68k_read_immediate_16(A) ( ( (A) & 0x800000) ? FETCH16RAM((A)) : FETCH16ROM((A)) )
-#define m68k_read_immediate_32(A) ( ( (A) & 0x800000) ? FETCH32RAM((A)) : FETCH32ROM((A)) )
-
-#define m68k_read_pcrelative_8(A) ( FETCH8ROM((A)) )
-#define m68k_read_pcrelative_16(A) ( FETCH16ROM((A)) )
-#define m68k_read_pcrelative_32(A) ( FETCH32ROM((A)) )
-
 /* Read from anywhere */
 unsigned int  m68k_read_memory_8(unsigned int address);
 unsigned int  m68k_read_memory_16(unsigned int address);
 unsigned int  m68k_read_memory_32(unsigned int address);
 
-/* Read data immediately following the PC */
-// unsigned int  m68k_read_immediate_16(unsigned int address);
-// unsigned int  m68k_read_immediate_32(unsigned int address);
+/* m68k_read_immediate_16/32 fetch the opcode/extension-word stream at
+ * REG_PC -- called on every single instruction dispatch
+ * (m68kcpu.c:307,313) and for PC-relative extension words. The versions
+ * that used to be here tested only bit 23 (`& 0x800000`) to pick ROM vs
+ * RAM and never masked the address to the 68000's real 24-bit bus
+ * (0xFFFFFF -- the same CPU_ADDRESS_MASK the general-purpose
+ * m68ki_read_8/16/32 in m68kcpu.h already apply via ADDRESS_68K(), just
+ * not here). A guest PC that goes wild -- from any upstream bug -- was
+ * therefore not wrapped into an in-range access the way real 68000
+ * silicon (24 address pins) or m68ki_read_16/32 (data reads) already do;
+ * it walked off ROM_DATA's host pointer by the raw, unmasked guest
+ * address. Measured 2026-08-02: PC=0x21000002, ROM_DATA=0x480d247c, fault
+ * address exactly ROM_DATA+PC=0x690d247c -- outside the 32MB PSRAM window
+ * entirely. Masking to 24 bits turns that PC into 0x000002, a normal ROM
+ * offset. This does not fix whatever put PC there; it stops an emulated
+ * wild jump from becoming a host segfault, matching what an emulated bus
+ * error should look like instead.
+ * Routing mirrors m68ki_read_16/32: below 0x800000 is ROM, at/above
+ * 0xFF0000 is RAM, everything between (I/O, VDP, banking registers, that
+ * middle region) goes through the general memory-mapped dispatch instead
+ * of being silently treated as ROM. */
+static inline unsigned int m68k_read_immediate_16(unsigned int address)
+{
+  /* Diagnostic for the wild-jump question this masking fix papers over:
+   * keep the last few opcode-fetch PCs in a ring buffer, and the first
+   * time one lands somewhere a 68000 program can never legitimately be
+   * executing from, dump that history once.
+   *
+   * Only ROM (< 0x800000) and work RAM (0xFF0000-0xFFFFFF) are real,
+   * executable memory on a Mega Drive. The first version of this check
+   * flagged any raw address that needed its top byte masked off, which
+   * false-positived constantly: games routinely relocate hot code into
+   * RAM and jump to it, and that target is commonly computed through a
+   * sign-extended 16-bit value, so the *raw* register legitimately reads
+   * like 0xFFxxxxxx. Measured 2026-08-02: PC=0xfffffc1a masks to
+   * 0xfffc1a, squarely inside RAM -- not wild, just ordinary in-RAM
+   * execution, and the old check reported it anyway. What's actually
+   * nonsense is a *masked* PC landing in what's left (0x800000-0xFEFFFF):
+   * VDP/sound/bank registers and expansion space, none of which is
+   * executable on real hardware either -- that's the only range this
+   * checks now. (Compare the incident this diagnostic was built for:
+   * PC=0x21000002 masked to a plausible-looking ROM offset by
+   * coincidence; the real bug there was upstream -- an unstripped copier
+   * header, fixed separately in load_cartridge() -- not something this
+   * narrower check would have needed to catch.) */
+  static unsigned int history[8];
+  static unsigned int idx = 0;
+  unsigned int masked = address & 0xFFFFFF;
+  if (masked >= 0x800000 && masked < 0xFF0000) {
+    static int reported = 0;
+    if (!reported) {
+      extern int scan_line;
+      reported = 1;
+      printf("m68k_read_immediate_16: wild PC 0x%08x (masked 0x%06x, in VDP/IO/bank space) at scan_line %d, recent PCs:",
+             address, masked, scan_line);
+      for (unsigned int i = 0; i < 8; i++)
+        printf(" 0x%08x", history[(idx + i) & 7]);
+      printf("\n");
+    }
+  }
+  history[idx & 7] = address;
+  idx++;
+  if (masked < 0x800000) return FETCH16ROM(masked);
+  if (masked >= 0xFF0000) return FETCH16RAM(masked);
+  return m68k_read_memory_16(masked);
+}
+static inline unsigned int m68k_read_immediate_32(unsigned int address)
+{
+  address &= 0xFFFFFF;
+  if (address < 0x800000) return FETCH32ROM(address);
+  if (address >= 0xFF0000) return FETCH32RAM(address);
+  return m68k_read_memory_32(address);
+}
 
-/* Read data relative to the PC */
-//unsigned int  m68k_read_pcrelative_8(unsigned int address);
-//unsigned int  m68k_read_pcrelative_16(unsigned int address);
-//unsigned int  m68k_read_pcrelative_32(unsigned int address);
+static inline unsigned int m68k_read_pcrelative_8(unsigned int address)
+{
+  address &= 0xFFFFFF;
+  if (address < 0x800000) return FETCH8ROM(address);
+  if (address >= 0xFF0000) return FETCH8RAM(address);
+  return m68k_read_memory_8(address);
+}
+static inline unsigned int m68k_read_pcrelative_16(unsigned int address)
+{
+  return m68k_read_immediate_16(address);
+}
+static inline unsigned int m68k_read_pcrelative_32(unsigned int address)
+{
+  return m68k_read_immediate_32(address);
+}
 
 /* Memory access for the disassembler */
 unsigned int m68k_read_disassembler_8  (unsigned int address);

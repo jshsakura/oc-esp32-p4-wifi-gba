@@ -85,7 +85,11 @@ enum gwenesis_bus_pad_button
     PAD_S
 };
 
-void load_cartridge(unsigned char *buffer, size_t size);
+// Returns 1 if the ROM was accepted (header handled, "SEGA" signature and
+// reset vector validated -- see gwenesis_rom_looks_valid() in
+// gwenesis_bus.c), 0 if it should be refused. Caller must not proceed to
+// power_on()/reset_emulation() on a 0 return.
+int load_cartridge(unsigned char *buffer, size_t size);
 
 void power_on();
 void reset_emulation();

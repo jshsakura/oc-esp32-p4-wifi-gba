@@ -2152,6 +2152,14 @@ void ym2612_run( int target) {
   }
   int ym2612_prev_index = ym2612_index;
   ym2612_index += (target-ym2612_clock) / ym2612.divisor;
+  /* gwenesis_ym2612_buffer is GWENESIS_AUDIO_BUFFER_LENGTH_PAL samples (see
+   * main.c); clamp for the same reason as gwenesis_SN76489_run -- see the
+   * comment there. */
+  if (ym2612_index > GWENESIS_AUDIO_BUFFER_LENGTH_PAL) {
+    static int warned = 0;
+    if (!warned) { printf("ym2612_run: index %d clamped to %d\n", ym2612_index, GWENESIS_AUDIO_BUFFER_LENGTH_PAL); warned = 1; }
+    ym2612_index = GWENESIS_AUDIO_BUFFER_LENGTH_PAL;
+  }
   if (ym2612_index > ym2612_prev_index) {
     YM2612Update(gwenesis_ym2612_buffer + ym2612_prev_index, ym2612_index-ym2612_prev_index);
     ym2612_clock = ym2612_index*ym2612.divisor;

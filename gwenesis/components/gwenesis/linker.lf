@@ -1,0 +1,67 @@
+# Pin gwenesis's hot interpreter code into internal IRAM.
+#
+# Measured 2026-08-02: gwenesis is the only emulator core in this repo with
+# zero bytes in IRAM0 .text (`python3 -m esp_idf_size --archives
+# build/gwenesis.map`: libgwenesis.a shows "IRAM0 .text 0"). Every other core
+# pins its hot loop -- libnofrendo.a 20240B, libsmsplus.a 14494B, libgnuboy.a
+# 14596B, libsnes9x.a 41408B (all via IRAM_ATTR in their sources, e.g.
+# retro-core/components/nofrendo/nes/cpu.c). gwenesis has none.
+#
+# The reason it matters more here: m68kcpu.c #includes m68kops.h (Musashi's
+# generated opcode-handler table) into one translation unit. Split by section
+# with `riscv32-esp-elf-size -A`, m68kcpu.c.obj alone is 247384B .text (the
+# dispatch loop + ~2000 generated opcode handlers) and 308140B .rodata (the
+# 65536-entry instruction jump table plus per-opcode cycle tables, read on
+# every single M68K instruction fetch). The .rodata alone is more than double
+# CONFIG_CACHE_L2_CACHE_SIZE (0x20000 = 128KB), so an opcode dispatch is close
+# to a guaranteed L2 miss out to flash -- on every instruction, not
+# occasionally. Compare retro-core's other cores: libsnes9x.a's whole flash
+# .text is 280588B, still large, but SNES gets 27fps @ 96% BUSY (half speed)
+# where gwenesis got 15.6fps historically and measures 3-4fps now -- and SNES
+# has 41KB pinned where gwenesis has 0.
+#
+# Reference point: the STM32 game-and-watch-retro-go-sd port (weaker
+# hardware: single 280MHz M7, no PSRAM) doesn't rely on caching this code at
+# all -- it copies the *entire* Mega Drive core (interpreter, VDP, Z80,
+# everything) into a ~800KB zero-wait AXI SRAM overlay region before running
+# a single opcode (STM32H7B0VBTx_FLASH.ld: .overlay_md / .overlay_md_bss at
+# __RAM_EMU_START__, loaded AT> CORES i.e. copied from flash to RAM at boot).
+# Mega Drive is playable there. We don't have 800KB of headroom on this app
+# partition (`esp_idf_size build/gwenesis.map` showed ~310KB free D/IRAM,
+# 46.2% used, before this change) so we can't replicate that fully -- we pin
+# what fits.
+#
+# Budget: the first attempt tried m68kcpu's .text (247384B) plus everything
+# except Z80.c (~278KB total). That failed to link: `--enable-non-contiguous-
+# regions discards section ... Total discarded sections size is 179593
+# bytes`. The 46.2%-used / ~310KB-free figure from `esp_idf_size
+# build/gwenesis.map` is D/IRAM as a whole (sram_low + sram_high); .text can
+# only land in iram0_text, which lives in sram_low alone (see BRINGUP.md
+# 0.3-2), so the real spare .text budget is roughly 278KB - 180KB =~ 98KB,
+# not 310KB. m68kcpu.c.obj's .text (247KB) cannot fit in that on its own --
+# pinning it is the next thing to try, but only after freeing more sram_low
+# elsewhere (see the audit report's ranked list for how to measure whether
+# that's even worth doing before attempting it).
+#
+# What's pinned here instead is every *other* gwenesis object's .text --
+# VDP line rendering, the Z80 disassembly helper, both sound chips, the
+# cartridge I/O glue, savestate glue, and YM2612 -- 30224B total, comfortably
+# inside the ~98KB budget. Z80.c itself (57566B, the Z80 CPU interpreter) is
+# left out too: added to the safe set it would leave only ~10KB of margin,
+# too tight given other things also compete for sram_low as the app grows.
+# m68kcpu.c (the 68000 interpreter that actually dominates the frame loop)
+# stays in flash for now -- this change alone is not expected to close most
+# of the gap to the STM32 port's speed, but it is a real, measurable,
+# buildable step in the right direction, and isolates how much of the gap
+# these smaller pieces account for versus the 68000 core itself.
+[mapping:gwenesis_iram]
+archive: libgwenesis.a
+entries:
+    ym2612 (noflash_text)
+    gwenesis_vdp_gfx (noflash_text)
+    gwenesis_vdp_mem (noflash_text)
+    gwenesis_bus (noflash_text)
+    z80inst (noflash_text)
+    gwenesis_sn76489 (noflash_text)
+    gwenesis_io (noflash_text)
+    gwenesis_savestate (noflash_text)

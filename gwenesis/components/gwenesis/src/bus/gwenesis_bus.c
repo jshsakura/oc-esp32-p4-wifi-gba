@@ -55,6 +55,22 @@ void bus_log(const char *subs, const char *fmt, ...) {
 
 // Setup M68k memories ROM & RAM
 unsigned char *ROM_DATA; // 68K Main Program (uncompressed)
+// FETCH8ROM/16ROM/32ROM (m68k.h) index ROM_DATA directly by the guest 68000
+// address with no bounds check against how big the actual cartridge is --
+// only against MAX_ROM_SIZE (8MB), the nominal size of the whole ROM address
+// window. ROM_DATA itself is a plain pointer to whatever main.c's file-read
+// buffer was for *this* ROM (routinely a few hundred KB, e.g. 256KB), so any
+// address between the real cartridge size and 8MB reads past the allocation.
+// gwenesis_rom_mask bounds that to the next power of two at or above the
+// loaded size (computed once in load_cartridge, applied as a single AND on
+// every ROM fetch -- cheap, unlike a modulo, and this macro sits on the
+// hottest possible path: every M68K instruction fetch goes through it).
+// This does not perfectly reproduce real hardware ROM mirroring (which
+// wraps within the cartridge's own size, not the next power of two), but it
+// keeps every access inside memory that was actually allocated for the ROM
+// buffer or its 64KB-rounded padding (rg_storage_read_file, RG_FILE_ALIGN_64KB),
+// which is what matters for not walking off into unrelated PSRAM.
+unsigned int gwenesis_rom_mask = 0xFFFFFFFFu;
 unsigned char M68K_RAM[MAX_RAM_SIZE];    // 68K RAM
 
 // Setup Z80 Memory
@@ -72,7 +88,82 @@ int tmss_count = 0;
  *
  ******************************************************************************/
 
-void load_cartridge(unsigned char *buffer, size_t size)
+static int gwenesis_is_pow2(size_t x)
+{
+    return x != 0 && (x & (x - 1)) == 0;
+}
+
+// Copier-header ("SMD") detection. Real cartridge dumps are a power of two
+// (or at least don't carry copier metadata); files produced by cartridge
+// copiers like the Super Magic Drive prepend a 512-byte header. That header
+// pushes every fixed offset in the image -- the 68000 reset vector at 0x4,
+// the "SEGA" signature at 0x100, the region bytes set_region() reads at
+// 0x1F0 -- forward by 512 bytes, so the core loads and executes whatever
+// garbage happens to sit at the *wrong* offset instead. That is not a
+// hypothetical: measured 2026-08-02, a 262656-byte test ROM (262144 + 512)
+// was fed in raw. The 68000's first-ever instruction fetch (scan_line 0,
+// empty PC history -- i.e. state was never valid to begin with, nothing
+// "corrupted" it) read PC=0x20e99020 from what should have been the reset
+// vector, and gwenesis_bus_map_z80_address's assert caught the fallout a
+// few lines later. The apparent "3-4 fps" and the older "15.6 fps" figures
+// were both this: the core faithfully running noise, not a performance bug.
+//
+// True SMD files are also block-interleaved: after the header, ROM data is
+// split into 16KB blocks, each stored as its even bytes (first 8KB) then
+// its odd bytes (second 8KB) rather than in normal byte order, and the
+// header itself flags this (byte[1]==0x03, byte[8..9]==0xAA,0xBB -- see
+// https://github.com/franckverrot/EmulationResources/blob/master/consoles/megadrive/genesis_rom.txt).
+// A header-sized file that does *not* carry that flag combination is just
+// offset, not interleaved -- skipping the 512 bytes is correct and
+// de-interleaving it would scramble a file that was otherwise fine.
+static int gwenesis_detect_copier_header(unsigned char *buffer, size_t size)
+{
+    if (gwenesis_is_pow2(size))
+        return 0; // Raw dump, no header.
+    if (size > 512 && gwenesis_is_pow2(size - 512))
+        return 1; // Header-sized remainder is a clean power of two.
+    return 0; // Doesn't fit either shape; leave it alone rather than guess.
+}
+
+// Sanity check run *after* any header has been stripped/de-interleaved, so
+// a file whose header this heuristic mis-detects (or that was never a Mega
+// Drive ROM at all) is refused instead of silently executed. "SEGA" at
+// 0x100 is present in effectively every official and homebrew header
+// (SEGA GENESIS / SEGA MEGA DRIVE / SEGA 32X / SEGA PICO all start with
+// it); the reset vector at 0x4 must be an even address inside the
+// cartridge, since real 68000 silicon takes an address error on an odd
+// PC and gwenesis doesn't emulate holding an unmapped one gracefully
+// everywhere yet (see m68k_read_immediate_16's wild-PC guard in m68k.h,
+// which is the safety net for anything that gets past this check wrong).
+//
+// Reads go through FETCH8ROM, not a raw ROM_DATA index, to match how
+// set_region() (and every opcode/operand fetch) actually reads this
+// buffer: ROM_SWAP unconditionally swaps every adjacent byte pair in
+// ROM_DATA, and FETCH8ROM's `^1` undoes that per access to hand back the
+// logical (pre-swap) byte. Indexing ROM_DATA directly here would check
+// the signature and reset vector at the wrong byte order and reject
+// every valid ROM.
+static int gwenesis_rom_looks_valid(size_t data_size)
+{
+    if (data_size < 0x200)
+        return 0;
+    if (FETCH8ROM(0x100) != 'S' || FETCH8ROM(0x101) != 'E' ||
+        FETCH8ROM(0x102) != 'G' || FETCH8ROM(0x103) != 'A')
+        return 0;
+    unsigned int reset_vector = ((unsigned int)FETCH8ROM(4) << 24) | ((unsigned int)FETCH8ROM(5) << 16) |
+                                 ((unsigned int)FETCH8ROM(6) << 8) | (unsigned int)FETCH8ROM(7);
+    if (reset_vector & 1)
+        return 0;
+    if (reset_vector >= data_size)
+        return 0;
+    return 1;
+}
+
+// Returns 1 on a ROM that looks like a real Mega Drive cartridge and is
+// ready to run, 0 if it should be refused (caller must not proceed to
+// power_on()/reset_emulation() in that case -- see main.c, which turns a 0
+// here into rg_system_rom_load_failed() instead of booting).
+int load_cartridge(unsigned char *buffer, size_t size)
 {
     // Clear all volatile memory
     memset(M68K_RAM, 0, MAX_RAM_SIZE);
@@ -84,36 +175,81 @@ void load_cartridge(unsigned char *buffer, size_t size)
 
     // Copy file contents to CPU ROM memory
     ROM_DATA = buffer;
+    size_t data_size = size;
 
-    // https://github.com/franckverrot/EmulationResources/blob/master/consoles/megadrive/genesis_rom.txt
-    if (ROM_DATA[1] == 0x03 && ROM_DATA[8] == 0xAA && ROM_DATA[9] == 0xBB)
+    if (gwenesis_detect_copier_header(buffer, size))
     {
-      printf("--SMD de-interleave mode--\n");
-      memmove(ROM_DATA, ROM_DATA + 512, size - 512);
-      uint8 *temp = malloc(0x4000);
-      for (size_t i = 0; i < size; i += 0x4000)
+      // https://github.com/franckverrot/EmulationResources/blob/master/consoles/megadrive/genesis_rom.txt
+      if (buffer[1] == 0x03 && buffer[8] == 0xAA && buffer[9] == 0xBB)
       {
-        memcpy(temp, ROM_DATA + i, 0x4000);
-        for (size_t j = 0; j < 0x2000; ++j)
+        printf("--Copier header detected, SMD-interleaved, de-interleaving--\n");
+        memmove(ROM_DATA, ROM_DATA + 512, size - 512);
+        data_size = size - 512;
+        uint8 *temp = malloc(0x4000);
+        for (size_t i = 0; i < data_size; i += 0x4000)
         {
-          ROM_DATA[i + (j * 2) + 0] = temp[0x2000 + j];
-          ROM_DATA[i + (j * 2) + 1] = temp[0x0000 + j];
+          memcpy(temp, ROM_DATA + i, 0x4000);
+          for (size_t j = 0; j < 0x2000; ++j)
+          {
+            ROM_DATA[i + (j * 2) + 0] = temp[0x2000 + j];
+            ROM_DATA[i + (j * 2) + 1] = temp[0x0000 + j];
+          }
         }
+        free(temp);
       }
-      free(temp);
+      else
+      {
+        printf("--Copier header detected (512 bytes), not interleaved, skipping--\n");
+        memmove(ROM_DATA, ROM_DATA + 512, size - 512);
+        data_size = size - 512;
+      }
+    }
+
+    // Next power of two >= data_size, minus 1, e.g. a 256KB (0x40000) ROM
+    // stays 0x3FFFF. Computed from data_size (post header-strip), not the
+    // raw file size -- see gwenesis_rom_mask's declaration above.
+    {
+      unsigned int rounded = 1;
+      while (rounded < data_size)
+        rounded <<= 1;
+      gwenesis_rom_mask = rounded - 1;
     }
 
     #ifdef ROM_SWAP
     bus_log(__FUNCTION__,"--ROM swap mode--");
-    for (int i=0; i < size;i+=2 )
-    {   
+    for (size_t i=0; i < data_size;i+=2 )
+    {
         char z = ROM_DATA[i];
         ROM_DATA[i]=ROM_DATA[i+1];
         ROM_DATA[i+1]=z;
     }
     #endif
 
+    // TEMP probe: what is actually in this file? Printed before the verdict so a refusal
+    // still tells us the format rather than only that it was wrong.
+    {
+        printf("ROM probe: size=%u  head:", (unsigned)data_size);
+        for (int i = 0; i < 16; ++i) printf(" %02x", ((unsigned char *)ROM_DATA)[i]);
+        printf("\n  at 0x100:");
+        for (int i = 0x100; i < 0x110; ++i) printf(" %02x", ((unsigned char *)ROM_DATA)[i]);
+        printf("\n  ascii 0x100:");
+        for (int i = 0x100; i < 0x120; ++i) {
+            unsigned char c = ((unsigned char *)ROM_DATA)[i];
+            printf("%c", (c >= 32 && c < 127) ? c : '.');
+        }
+        printf("\n");
+    }
+
+    if (!gwenesis_rom_looks_valid(data_size))
+    {
+      printf("load_cartridge: ROM does not look like a Mega Drive cartridge "
+             "after header handling (no SEGA signature at 0x100, or reset "
+             "vector out of range/odd) -- refusing to run it.\n");
+      return 0;
+    }
+
     set_region();
+    return 1;
 }
 
 /******************************************************************************
