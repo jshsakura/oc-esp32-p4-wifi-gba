@@ -16,7 +16,7 @@ DEFAULT_TARGET = os.getenv("RG_TOOL_TARGET", "esp32p4")
 DEFAULT_BAUD = os.getenv("RG_TOOL_BAUD", "1152000")
 DEFAULT_PORT = os.getenv("RG_TOOL_PORT", "COM3")
 # DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core")
-DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core gbsp gwenesis fmsx prboom-go fake08 stella-go ngpocket-go supervision-go pkmini-go wswan-go vb-go")
+DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core gbsp gwenesis fmsx prboom-go fake08 stella-go ngpocket-go supervision-go pkmini-go wswan-go vb-go videopac-go fceumm-go")
 DEFAULT_NO_NETWORKING = os.getenv("RG_TOOL_NO_NETWORKING", "0") == "1"
 PROJECT_NAME = os.getenv("PROJECT_NAME", "retro-go")
 PROJECT_VER = os.getenv("PROJECT_VER", "2.0")
@@ -36,6 +36,8 @@ PROJECT_APPS = {
   'pkmini-go':      [0, 0, 589824],
   'wswan-go':       [0, 0, 589824],
   'vb-go':          [0, 0, 851968],
+  'videopac-go':    [0, 0, 1048576],
+  'fceumm-go':      [0, 0, 2097152],
 }
 # PROJECT_APPS = {}
 # for t in glob.glob("*/CMakeLists.txt"):
@@ -125,9 +127,16 @@ def build_image(output_file, apps, img_format="esp32", fatsize=0):
         table_bin = f.read()
 
     print("Building bootloader...")
+    #
+    # Every time, not just when one is missing. The bootloader is built from the same
+    # sdkconfig as the apps and carries settings that have to agree with them -- PSRAM speed
+    # above all, since the bootloader initialises it and the MSPI cache-safe-speed transition
+    # is gated on CONFIG_SPIRAM_SPEED on both sides. A stale bootloader under new apps dies
+    # before logging is up: clean bootloader stage, clean segment load, then silence and the
+    # watchdog. That cost a day, and it was recorded in the docs as "80MHz PSRAM does not work
+    # on this board" until the mismatch was found.
     bootloader_file = os.path.join(os.getcwd(), list(apps)[0], "build", "bootloader", "bootloader.bin")
-    if not os.path.exists(bootloader_file):
-        run([IDF_PY, "bootloader"], cwd=os.path.join(os.getcwd(), list(apps)[0]))
+    run([IDF_PY, "bootloader"], cwd=os.path.join(os.getcwd(), list(apps)[0]))
     with open(bootloader_file, "rb") as f:
         bootloader_bin = f.read()
 

@@ -230,25 +230,28 @@ CONFIG_SPI_SLAVE_IN_IRAM=n
 
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_HEX=y
-# 20, not 80, and this is a loss worth understanding rather than a setting.
+# 80MHz. It is worth about three times on everything that touches PSRAM -- ROMs, core
+# working sets, frame buffers -- and it is what lets the display blit fit inside a 60fps
+# frame at all: Mega Drive's blit is 34.5ms at 20MHz against 12.25ms here, and 16.6ms is the
+# budget. Below it the display paces the emulator down to 55fps, which underfeeds the audio
+# codec and makes the speaker stutter. This is not a tuning knob, it is the setting that
+# makes the device work.
 #
-# 80MHz is stable for the launcher, gbsp, gwenesis and ngpocket-go, and it is worth about
-# three times on everything that touches PSRAM -- the display blit went from 23.4ms to 7.7ms
-# a frame on GBA, which is the difference between 60fps being reachable and not (A13/A14).
+# It was recorded as unusable for most of 2026-08-02 -- "boot-loops retro-core" -- and that
+# was wrong. The bootloader initialises PSRAM (CONFIG_SPIRAM_BOOT_HW_INIT) and the MSPI
+# cache-safe-speed transition during clock switching is gated on this very symbol in both
+# the bootloader and the app, so a bootloader built for one speed under an app built for
+# another dies before logging is up: clean bootloader stage, clean segment load, silence,
+# watchdog. rg_tool.py's build_image() only rebuilt the bootloader when one was *absent*, so
+# a stale 20MHz bootloader kept getting baked into 80MHz images. Fixed there; it now rebuilds
+# every time.
 #
-# It boot-loops retro-core. Reproducibly, on a freshly written partition, with flash at both
-# 120MHz and 40MHz, so it is not MSPI contention with the flash. The second-stage bootloader
-# stops after `entry 0x4ff29ed0` without printing one line of its own and the watchdog takes
-# it -- the app never starts, so this is the loader reading a 1.7MB image, not anything
-# retro-core does. Every other app is around 1MB.
-#
-# retro-core carries eleven of the twenty-two systems, so 80MHz cannot ship until that is
-# understood. Next step is esp-idf's own MSPI timing diagnostics, which are ESP_EARLY_LOGD
-# and therefore compiled out at this project's log level -- build once with the log level
-# raised and compare the tuning point the bootloader picks on a launcher boot against a
-# retro-core boot.
-CONFIG_SPIRAM_SPEED_20M=y
-CONFIG_SPIRAM_SPEED=20
+# 200MHz remains out of reach: it needs CONFIG_IDF_EXPERIMENTAL_FEATURES, and with that on
+# the board boot-loops inside MSPI timing tuning. Flash stays at 80MHz too -- this board's
+# GD25Q256 answers "High performance mode of this flash model hasn't been supported", so the
+# 120MHz request above is one Kconfig will keep declining.
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_SPEED=80
 CONFIG_SPIRAM_BOOT_HW_INIT=y
 CONFIG_SPIRAM_BOOT_INIT=y
 CONFIG_SPIRAM_PRE_CONFIGURE_MEMORY_PROTECTION=y
