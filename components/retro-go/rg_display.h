@@ -115,6 +115,11 @@ void rg_display_force_redraw(void);
 bool rg_display_has_panel(void);
 // Frames the PPA blit took, frames it handed back to the CPU, and why it last handed one back.
 const char *rg_display_ppa_status(int *done, int *skipped);
+// Benchmark only: turn the PPA's rotation off to price it separately. The picture comes out
+// wrong on a real panel.
+void rg_display_ppa_set_rotation(bool enabled);
+// Microseconds spent so far expanding sources on the CPU, and driving the DMA.
+void rg_display_ppa_split(int64_t *convert_us, int64_t *transfer_us);
 // Times the blit per system-sized source and logs a table. See rg_display_bench.c.
 void rg_display_bench_run_if_requested(void);
 void rg_display_submit(const rg_surface_t *update, uint32_t flags);

@@ -55,7 +55,9 @@ static void bench_one(const char *name, int width, int height)
     uint8_t *pixels = surface->data;
 
     int ppa_before = 0, cpu_before = 0;
+    int64_t convert_before = 0, transfer_before = 0;
     rg_display_ppa_status(&ppa_before, &cpu_before);
+    rg_display_ppa_split(&convert_before, &transfer_before);
     rg_display_sync(true);
     rg_display_counters_t before = rg_display_get_counters();
     int64_t wall_start = rg_system_timer();
@@ -77,10 +79,13 @@ static void bench_one(const char *name, int width, int height)
     int ppa_done = 0, ppa_skipped = 0;
     const char *why = rg_display_ppa_status(&ppa_done, &ppa_skipped);
     int on_cpu = ppa_skipped - cpu_before;
-    RG_LOGI("%-13s %3dx%-3d  blit %6.2f ms/frame   wall %6.2f ms/frame   ppa %d cpu %d%s%s",
+    int64_t convert_after = 0, transfer_after = 0;
+    rg_display_ppa_split(&convert_after, &transfer_after);
+    RG_LOGI("%-13s %3dx%-3d  blit %6.2f ms   expand %5.2f ms   dma %5.2f ms   ppa %d cpu %d%s%s",
             name, width, height,
             (after.busyTime - before.busyTime) / 1000.0f / frames,
-            wall / 1000.0f / frames,
+            (convert_after - convert_before) / 1000.0f / frames,
+            (transfer_after - transfer_before) / 1000.0f / frames,
             ppa_done - ppa_before, on_cpu,
             on_cpu ? "  <- " : "", on_cpu ? why : "");
 
@@ -101,5 +106,13 @@ void rg_display_bench_run_if_requested(void)
     RG_LOGI("=== display blit benchmark (%d frames each, 8-bit paletted source) ===", BENCH_FRAMES);
     for (size_t i = 0; i < RG_COUNT(bench_sources); ++i)
         bench_one(bench_sources[i].name, bench_sources[i].width, bench_sources[i].height);
+
+    // What does the quarter turn cost by itself? A DMA writing a rotated picture writes down
+    // a column, so it touches a new cache line per pixel instead of filling one -- the same
+    // reason the CPU transpose was the expensive half of the old blit. Priced on the one
+    // source whose output (480x480) fits the framebuffer both ways round.
+    rg_display_ppa_set_rotation(false);
+    bench_one("^ unrotated", 128, 128);
+    rg_display_ppa_set_rotation(true);
     RG_LOGI("=== display blit benchmark done ===");
 }

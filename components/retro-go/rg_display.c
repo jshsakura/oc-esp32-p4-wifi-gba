@@ -80,6 +80,12 @@ static size_t ppa_source_buffer_size;
 static bool ppa_drew_last_frame;
 static int32_t ppa_frames_done, ppa_frames_skipped;
 static const char *ppa_skip_reason = "not tried";
+// Benchmark only: ask for the picture unrotated, to price the rotation on its own. The
+// output is wrong on a panel; nothing but rg_display_bench.c should ever set this.
+static bool ppa_rotation_off;
+// Split the two halves of the fast path: the CPU expanding the source, and the DMA doing
+// everything else. The bench reports both, because guessing which one dominates was wrong.
+static int64_t ppa_convert_time, ppa_transfer_time;
 #define PPA_SKIP(why) do { ppa_skip_reason = (why); return false; } while (0)
 #endif
 
@@ -154,11 +160,14 @@ static bool ppa_write_update(const rg_surface_t *update, int draw_left, int draw
     // lcd_send_buffer() maps logical (lx, ly) to panel (fb_width - 1 - ly, lx) by hand: a
     // quarter turn clockwise. PPA counts counter-clockwise, so clockwise 90 is 270. The
     // block lands where that mapping sends the logical rectangle's far edge.
-    const ppa_srm_rotation_angle_t rotation = PPA_SRM_ROTATION_ANGLE_270;
-    const int out_x = fb_width - (top + draw_height);
-    const int out_y = left;
-    const int out_w = draw_height;
-    const int out_h = draw_width;
+    const ppa_srm_rotation_angle_t rotation = ppa_rotation_off
+        ? PPA_SRM_ROTATION_ANGLE_0 : PPA_SRM_ROTATION_ANGLE_270;
+    // Unrotated, the logical canvas is wider than the panel is, so the centring offset puts
+    // the block off the edge. It is a measurement, not a picture: park it at the origin.
+    const int out_x = ppa_rotation_off ? 0 : fb_width - (top + draw_height);
+    const int out_y = ppa_rotation_off ? 0 : left;
+    const int out_w = ppa_rotation_off ? draw_width : draw_height;
+    const int out_h = ppa_rotation_off ? draw_height : draw_width;
 #elif RG_SCREEN_ROTATE == 0
     const ppa_srm_rotation_angle_t rotation = PPA_SRM_ROTATION_ANGLE_0;
     const int out_x = left;
@@ -188,6 +197,7 @@ static bool ppa_write_update(const rg_surface_t *update, int draw_left, int draw
 
     const void *data = update->data + update->offset + (crop_top * stride);
     uint16_t *dst = ppa_source_buffer;
+    const int64_t convert_start = rg_system_timer();
 
     if (format & RG_PIXEL_PALETTE)
     {
@@ -224,6 +234,9 @@ static bool ppa_write_update(const rg_surface_t *update, int draw_left, int draw
         PPA_SKIP("pixel format the engine does not take");
     }
 
+    ppa_convert_time += rg_system_timer() - convert_start;
+    const int64_t transfer_start = rg_system_timer();
+
     // The DMA reads memory, not our cache.
     esp_cache_msync(ppa_source_buffer, PPA_ALIGN_UP(needed),
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M);
@@ -258,7 +271,9 @@ static bool ppa_write_update(const rg_surface_t *update, int draw_left, int draw
         .mode = PPA_TRANS_MODE_BLOCKING,
     };
 
-    if (ppa_do_scale_rotate_mirror(ppa_client, &oper) != ESP_OK)
+    esp_err_t err = ppa_do_scale_rotate_mirror(ppa_client, &oper);
+    ppa_transfer_time += rg_system_timer() - transfer_start;
+    if (err != ESP_OK)
         PPA_SKIP("the driver rejected the transaction");
     ppa_frames_done++;
     return true;
@@ -622,6 +637,26 @@ static void display_task(void *arg)
 
         lcd_sync();
     }
+}
+
+void rg_display_ppa_set_rotation(bool enabled)
+{
+#ifdef RG_DISPLAY_PPA
+    ppa_rotation_off = !enabled;
+#else
+    (void)enabled;
+#endif
+}
+
+void rg_display_ppa_split(int64_t *convert_us, int64_t *transfer_us)
+{
+#ifdef RG_DISPLAY_PPA
+    if (convert_us) *convert_us = ppa_convert_time;
+    if (transfer_us) *transfer_us = ppa_transfer_time;
+#else
+    if (convert_us) *convert_us = 0;
+    if (transfer_us) *transfer_us = 0;
+#endif
 }
 
 const char *rg_display_ppa_status(int *done, int *skipped)

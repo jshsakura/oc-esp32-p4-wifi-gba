@@ -206,10 +206,32 @@ CONFIG_SPI_SLAVE_IN_IRAM=n
 #
 # SPI RAM (PSRAM) - Critical for game ROMs and frame buffers
 #
+#
+# PSRAM and flash were asking for speeds Kconfig could not give them
+#
+# CONFIG_SPIRAM_SPEED_200M and CONFIG_ESPTOOLPY_FLASHFREQ_120M are both gated behind
+# IDF_EXPERIMENTAL_FEATURES on the ESP32-P4. Without it the choice symbols are not
+# selectable at all, and Kconfig quietly fell back to the slowest option in each list --
+# the device booted at *20MHz* PSRAM and 80MHz flash while this file said 200 and 120,
+# and `esp_psram: Speed: 20MHz` in the boot log was the only sign of it.
+#
+# That is a tenfold cut on every PSRAM access, which is where every frame buffer, every
+# ROM and every core's working set lives. Measured before/after in BRINGUP A13.
+#
+# Flash stays at 80MHz. 120MHz needs the chip's high-performance mode, and this board's
+# GD25Q256 answers "High performance mode of this flash model hasn't been supported" -- so
+# CONFIG_ESPTOOLPY_FLASHFREQ_120M above is a request Kconfig will keep declining. Left as
+# it is rather than edited to 80, so the next person sees the same warning and stops here
+# too instead of re-deriving it.
+#
+# The bootloader initialises PSRAM (CONFIG_SPIRAM_BOOT_HW_INIT), so changing this speed
+# means reflashing the bootloader, not just an app partition. Flashing one app against a
+# bootloader built for the old speed boot-loops the device on the watchdog.
+
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_HEX=y
-CONFIG_SPIRAM_SPEED_200M=y
-CONFIG_SPIRAM_SPEED=200
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_SPEED=80
 CONFIG_SPIRAM_BOOT_HW_INIT=y
 CONFIG_SPIRAM_BOOT_INIT=y
 CONFIG_SPIRAM_PRE_CONFIGURE_MEMORY_PROTECTION=y
