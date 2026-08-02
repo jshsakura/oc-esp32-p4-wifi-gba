@@ -1,5 +1,6 @@
 #include "rg_system.h"
 #include "rg_psram_exec_test.h"
+#include "rg_display.h"
 
 #if defined(ESP_PLATFORM) && defined(CONFIG_IDF_TARGET_ESP32P4) && defined(CONFIG_SPIRAM)
 
@@ -112,17 +113,28 @@ static bool time_block(const char *label, void *code, int repeats)
 
 void rg_psram_exec_test(void)
 {
-    if (!rg_storage_exists(MARKER_FILE))
+    // Also runs with no panel attached, not just when the marker asks. The question this
+    // probe was written to answer -- does instruction fetch from PSRAM fault -- came back
+    // "no" on 2026-07-31, so re-running it can no longer brick anything. What changed is the
+    // memory underneath it: the PSRAM was found on 2026-08-02 to have been clocked at 20MHz
+    // rather than 80, so the MIPS numbers it produced, and the whole dynarec design that
+    // hangs off their ratio, were measured against a memory system running at a quarter
+    // speed. A board with no screen is a board being brought up; let it answer again.
+    bool asked = rg_storage_exists(MARKER_FILE);
+    if (!asked && rg_display_has_panel())
         return;
 
     // Before anything that can fault. See the header: the answer we are looking for is a
     // panic, and a panic that repeats every boot is not a result, it is a brick.
-    rg_storage_delete(MARKER_FILE);
+    if (asked)
+        rg_storage_delete(MARKER_FILE);
     rg_storage_mkdir(RG_BASE_PATH);
     result_fp = fopen(RESULT_FILE, "w");
 
     note("=== PSRAM instruction fetch probe ===");
     note("build: %s", RG_BUILD_INFO);
+    // The number every MIPS figure below is really a measurement of.
+    note("PSRAM clock: %d MHz", CONFIG_SPIRAM_SPEED);
 
     // 1. Does the heap even offer executable PSRAM? If it does not, ask for plain PSRAM and
     //    try anyway -- the heap's opinion and the hardware's are two different questions, and
@@ -171,12 +183,22 @@ void rg_psram_exec_test(void)
         iram_code = heap_caps_aligned_alloc(ALIGN_TO, warm_size, MALLOC_CAP_INTERNAL);
         note("internal alloc without MALLOC_CAP_EXEC: %s", iram_code ? "ok" : "NULL");
     }
-    if (iram_code)
+    // Only when the marker asked for it. This is the step that faults: the 2026-07-31 run
+    // answered that ordinary heap internal RAM is not executable here, and the fault is a
+    // panic. That was an acceptable price for an answer nobody had; it is not an acceptable
+    // price on every boot of a screenless board, which is a boot loop. The answer is in
+    // ROADMAP appendix D -- re-ask it by hand, with the marker, if it is ever in doubt.
+    if (iram_code && asked)
     {
         describe("internal block", iram_code);
         emit_block(iram_code);
         publish_code(iram_code, warm_size);
         time_block("internal warm", iram_code, 2000);
+        heap_caps_free(iram_code);
+    }
+    else if (iram_code)
+    {
+        note("internal warm: skipped (it faults, and this run was not asked for by hand)");
         heap_caps_free(iram_code);
     }
     else
