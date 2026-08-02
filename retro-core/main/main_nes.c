@@ -220,7 +220,7 @@ void nes_main(void)
         void *data;
         size_t size;
         if (!rg_storage_unzip_file(app->romPath, NULL, &data, &size, RG_FILE_ALIGN_8KB))
-            RG_PANIC("ROM file unzipping failed!");
+            rg_system_rom_load_failed(_("ROM file unzipping failed!"));
         ret = nes_insertcart(rom_loadmem(data, size));
     }
     else
@@ -228,14 +228,16 @@ void nes_main(void)
         ret = nes_loadfile(app->romPath);
     }
 
+    // nes_insertcart/nes_loadfile fully validate the header and mapper before returning, so
+    // these are all checked "bad ROM" outcomes, not crashes.
     if (ret == -1)
-        RG_PANIC("ROM load failed.");
+        rg_system_rom_load_failed(_("ROM load failed."));
     else if (ret == -2)
-        RG_PANIC("Unsupported mapper.");
+        rg_system_rom_load_failed(_("Unsupported mapper."));
     else if (ret == -3)
-        RG_PANIC("BIOS file required.");
+        rg_system_rom_load_failed(_("BIOS file required."));
     else if (ret < 0)
-        RG_PANIC("Unsupported ROM.");
+        rg_system_rom_load_failed(_("Unsupported ROM."));
 
     nes->blit_func = blit_screen;
 

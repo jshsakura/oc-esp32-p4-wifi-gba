@@ -143,7 +143,7 @@ void gw_main(void)
 
     FILE *fp = fopen(app->romPath, "rb");
     if (!fp)
-        RG_PANIC("Rom load failed");
+        rg_system_rom_load_failed(_("Rom load failed"));
     ROM_DATA = malloc(400000);
     // fseek(fp, 0x15, SEEK_SET);
     ROM_DATA_LENGTH = fread(ROM_DATA, 1, 400000, fp);
@@ -155,7 +155,7 @@ void gw_main(void)
     bool rom_status = gw_system_romload();
 
     if (!rom_status)
-        RG_PANIC("gw_system_romload failed!");
+        rg_system_rom_load_failed(_("gw_system_romload failed!"));
 
     /*** Clear audio buffer */
     gw_system_sound_init();

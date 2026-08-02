@@ -291,11 +291,11 @@ void app_main(void)
     if (rg_extension_match(app->romPath, "zip"))
     {
         if (!rg_storage_unzip_file(app->romPath, NULL, &rom_data, &rom_size, RG_FILE_ALIGN_64KB))
-            RG_PANIC("ROM file unzipping failed!");
+            rg_system_rom_load_failed(_("ROM file unzipping failed!"));
     }
     else if (!rg_storage_read_file(app->romPath, &rom_data, &rom_size, RG_FILE_ALIGN_64KB))
     {
-        RG_PANIC("ROM load failed!");
+        rg_system_rom_load_failed(_("ROM load failed!"));
     }
 
     RG_LOGI("load_cartridge(%p, %d)\n", rom_data, rom_size);

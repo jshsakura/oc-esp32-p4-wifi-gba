@@ -94,7 +94,7 @@ static CSystem *new_lynx(void)
         void *data;
         size_t size;
         if (!rg_storage_unzip_file(app->romPath, NULL, &data, &size, 0))
-            RG_PANIC("ROM file unzipping failed!");
+            rg_system_rom_load_failed(_("ROM file unzipping failed!"));
         CSystem *lynx = new CSystem((UBYTE*)data, size, MIKIE_PIXEL_FORMAT_16BPP_565_BE, app->sampleRate);
         free(data);
         return lynx;
@@ -211,7 +211,7 @@ extern "C" void lynx_main(void)
 
     if (lynx->mFileType == HANDY_FILETYPE_ILLEGAL)
     {
-        RG_PANIC("ROM loading failed!");
+        rg_system_rom_load_failed(_("ROM loading failed!"));
     }
 
     gPrimaryFrameBuffer = (UBYTE*)currentUpdate->data;

@@ -238,7 +238,9 @@ void app_main(void)
     memset(gamepak_backup, 0xff, sizeof(gamepak_backup));
     if (load_gamepak(NULL, app->romPath, FEAT_DISABLE, FEAT_DISABLE, SERIAL_MODE_DISABLED) != 0)
     {
-        RG_PANIC("Could not load the game file.");
+        // load_gamepak checks the header/size before returning, so this is a checked "bad ROM"
+        // rejection, not a crash: tell the user and go back to the launcher instead of panicking.
+        rg_system_rom_load_failed(_("Could not load the game file."));
     }
 
     reset_gba();

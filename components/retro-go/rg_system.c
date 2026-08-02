@@ -961,6 +961,17 @@ void rg_system_exit(void)
     rg_system_switch_app(RG_APP_LAUNCHER, NULL, NULL, 0, 0);
 }
 
+void rg_system_rom_load_failed(const char *message)
+{
+    // This is the checked counterpart to RG_PANIC() for ROM loading: the file was read fine
+    // but the core's own validation (header magic, mapper table, missing BIOS, ...) rejected
+    // it. That's an expected outcome of picking a bad file, so we tell the user and return to
+    // the launcher cleanly instead of aborting into the panic/crash-trace path.
+    RG_LOGE("ROM load failed: %s\n", message ?: "(no details)");
+    rg_gui_alert(_("Unable to load ROM"), message);
+    rg_system_exit();
+}
+
 void rg_system_switch_app(const char *partition, const char *name, const char *args, int save_slot, uint32_t flags)
 {
     RG_LOGI("Switching to app %s (%s)", partition ?: "-", name ?: "-");

@@ -129,13 +129,13 @@ void sms_main(void)
         void *data;
         size_t size;
         if (!rg_storage_unzip_file(app->romPath, NULL, &data, &size, RG_FILE_ALIGN_16KB))
-            RG_PANIC("ROM file unzipping failed!");
+            rg_system_rom_load_failed(_("ROM file unzipping failed!"));
         if (!load_rom(data, RG_MAX(0x4000, size), size))
-            RG_PANIC("ROM file loading failed!");
+            rg_system_rom_load_failed(_("ROM file loading failed!"));
     }
     else if (!load_rom_file(app->romPath))
     {
-        RG_PANIC("ROM file loading failed!");
+        rg_system_rom_load_failed(_("ROM file loading failed!"));
     }
 
     bitmap.width = SMS_WIDTH;

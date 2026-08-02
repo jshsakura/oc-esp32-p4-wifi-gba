@@ -494,12 +494,12 @@ void snes_main(void)
     if (rg_extension_match(filename, "zip"))
     {
         if (!rg_storage_unzip_file(filename, NULL, (void **)&Memory.ROM, &Memory.ROM_AllocSize, RG_FILE_USER_BUFFER))
-            RG_PANIC("ROM file unzipping failed!");
+            rg_system_rom_load_failed(_("ROM file unzipping failed!"));
         filename = NULL;
     }
 
     if (!LoadROM(filename))
-        RG_PANIC("ROM loading failed!");
+        rg_system_rom_load_failed(_("ROM loading failed!"));
 
     load_sram();
 

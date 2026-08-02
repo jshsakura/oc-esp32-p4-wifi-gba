@@ -279,13 +279,13 @@ void gbc_main(void)
         void *data;
         size_t size;
         if (!rg_storage_unzip_file(app->romPath, NULL, &data, &size, RG_FILE_ALIGN_16KB))
-            RG_PANIC("ROM file unzipping failed!");
+            rg_system_rom_load_failed(_("ROM file unzipping failed!"));
         if (gnuboy_load_rom(data, size) < 0)
-            RG_PANIC("ROM Loading failed!");
+            rg_system_rom_load_failed(_("ROM Loading failed!"));
     }
     else if (gnuboy_load_rom_file(app->romPath) < 0)
     {
-        RG_PANIC("ROM Loading failed!");
+        rg_system_rom_load_failed(_("ROM Loading failed!"));
     }
 
     // Load BIOS
