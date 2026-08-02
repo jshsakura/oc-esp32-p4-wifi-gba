@@ -83,11 +83,34 @@ extern _u32* regCodeMapL[4][64];
 
 //=============================================================================
 
-_u8 statusIFF(void);
-void setStatusIFF(_u8 iff);
+// statusIFF()/setStatusIFF()/changedSP() are 'static inline' here (not
+// extern functions in TLCS900h_registers.c) for the same reason as
+// mem.h's load/store functions: updateTimers() in interrupt.c calls
+// statusIFF() on essentially every emulated instruction, and a real
+// cross-TU call/return costs real stack traffic on RISC-V where the
+// original Xtensa target had register windows to hide it behind.
+static inline _u8 statusIFF(void)
+{
+	_u8 iff = (sr & 0x7000) >> 12;
+
+	if (iff == 1)
+		return 0;
+	else
+		return iff;
+}
+
+static inline void setStatusIFF(_u8 iff)
+{
+	sr = (sr & 0x8FFF) | ((iff & 0x7) << 12);
+}
+
+static inline void changedSP(void)
+{
+	//Store global RFP for optimisation.
+	statusRFP = ((sr & 0x300) >> 8);
+}
 
 void setStatusRFP(_u8 rfp);
-void changedSP(void);
 
 #define FLAG_S ((sr & 0x0080) >> 7)
 #define FLAG_Z ((sr & 0x0040) >> 6)

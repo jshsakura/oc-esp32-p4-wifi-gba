@@ -45,7 +45,9 @@
 
 //=============================================================================
 
-_u16 cfb[256*256];
+// See the comment on the extern declaration in neopop.h: this only needs to
+// hold the visible screen, not a full 256x256 tilemap-sized surface.
+_u16 cfb[SCREEN_WIDTH * SCREEN_HEIGHT];
 _u8 zbuffer[256];
 
 _u16* cfb_scanline;	//set = scanline * SCREEN_WIDTH

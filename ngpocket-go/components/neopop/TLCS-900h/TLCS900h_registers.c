@@ -141,22 +141,8 @@ _u32* regCodeMapL[4][64] =
 
 //=============================================================================
 
-_u8 statusIFF(void)	
-{
-	_u8 iff = (sr & 0x7000) >> 12;
-
-	if (iff == 1)
-		return 0;
-	else
-		return iff;
-}
-
-void setStatusIFF(_u8 iff)
-{
-	sr = (sr & 0x8FFF) | ((iff & 0x7) << 12);
-}
-
-//=============================================================================
+// statusIFF()/setStatusIFF()/changedSP() moved to TLCS900h_registers.h as
+// 'static inline' -- see the comment there.
 
 _u8 statusRFP;
 
@@ -164,12 +150,6 @@ void setStatusRFP(_u8 rfp)
 {
 	sr = (sr & 0xF8FF) | ((rfp & 0x3) << 8);
 	changedSP();
-}
-
-void changedSP(void)
-{
-	//Store global RFP for optimisation. 
-	statusRFP = ((sr & 0x300) >> 8);
 }
 
 //=============================================================================

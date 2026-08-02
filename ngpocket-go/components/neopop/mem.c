@@ -92,7 +92,10 @@ should stop "Gals Fighters" from writing all over itself.
 
 //Hack way of returning good EEPROM status.
 BOOL eepromStatusEnable = FALSE;
-static _u32 eepromStatus;	
+// Not 'static' any more: translate_address_read() that uses this as scratch
+// storage for the EEPROM-status read case moved to mem.h as a static inline
+// function (see mem.h for why), so this needs real extern linkage now.
+_u32 eepromStatus;
 
 _u8 ram[1 + RAM_END - RAM_START];
 
@@ -105,185 +108,9 @@ BOOL memory_flash_command = FALSE;
 
 //=============================================================================
 
-#ifdef NEOPOP_DEBUG
-static void memory_error(_u32 address, BOOL read)
-{
-	debug_abort_memory = TRUE;
-
-	if (filter_mem)
-	{
-		if (debug_mask_memory_error_messages)
-			return;
-
-		if (read)
-			system_debug_message("Memory Exception: Read from %06X", address);
-		else
-			system_debug_message("Memory Exception: Write to %06X", address);
-	}
-}
-#endif
-
-//=============================================================================
-
-void* translate_address_read(_u32 address)
-{
-	address &= 0xFFFFFF;
-
-#ifdef NEOPOP_DEBUG
-
-	if (address == 0 && debug_mask_memory_error_messages == FALSE)
-	{ memory_error(address, TRUE); return NULL; }
-
-#endif
-
-	// ===================================
-
-	//RAS.H read (Simulated horizontal raster position)
-	if (address == 0x8008)
-		ram[0x8008] = (_u8)((abs(TIMER_HINT_RATE - (int)timer_hint)) >> 2);
-
-	if (address <= RAM_END)
-		return ram + address;
-
-	// ===================================
-
-	//Get EEPROM status?
-	if (eepromStatusEnable)
-	{
-		eepromStatusEnable = FALSE;
-		if (address == 0x220000 || address == 0x230000)
-		{
-			eepromStatus = 0xFFFFFFFF;
-			return &eepromStatus;
-		}
-	}
-
-	//ROM (LOW)
-	if (rom.data && address >= ROM_START && address <= ROM_END)
-	{
-		if (address <= ROM_START + rom.length)
-			return rom.data + (address - ROM_START);
-		else
-			return NULL;
-	}
-
-	//ROM (HIGH)
-	if (rom.data && address >= HIROM_START && address <= HIROM_END)
-	{
-		if (address <= HIROM_START + (rom.length - 0x200000))
-			return rom.data + 0x200000 + (address - HIROM_START);
-		else
-			return NULL;
-	}
-
-	// ===================================
-
-	//BIOS Access?
-	if ((address & 0xFF0000) == 0xFF0000)
-		return bios + (address & 0xFFFF); // BIOS ROM
-
-	// ===================================
-
-	//Signal a flash memory error
-	if (memory_unlock_flash_write)
-		memory_flash_error = TRUE;
-
-#ifdef NEOPOP_DEBUG
-	memory_error(address, TRUE);
-#endif
-	return NULL;
-}
-
-//=============================================================================
-
-void* translate_address_write(_u32 address)
-{	
-	address &= 0xFFFFFF;
-
-#ifdef NEOPOP_DEBUG
-
-	if (address == 0 && debug_mask_memory_error_messages == FALSE)
-	{ memory_error(address, FALSE); return NULL; }
-
-#endif
-
-	// ===================================
-
-
-	if (address <= RAM_END)
-		return ram + address;
-
-	// ===================================
-
-	if (memory_unlock_flash_write)
-	{
-		//ROM (LOW)
-		if (rom.data && address >= ROM_START && address <= ROM_END)
-		{
-			if (address <= ROM_START + rom.length)
-				return rom.data + (address - ROM_START);
-			else
-				return NULL;
-		}
-
-		//ROM (HIGH)
-		if (rom.data && address >= HIROM_START && address <= HIROM_END)
-		{
-			if (address <= HIROM_START + (rom.length - 0x200000))
-				return rom.data + 0x200000 + (address - HIROM_START);
-			else
-				return NULL;
-		}
-
-		//Signal a flash memory error
-		memory_flash_error = TRUE;
-	}
-	else
-	{
-		//ROM (LOW)
-		if (rom.data && address >= ROM_START && address <= ROM_END)
-		{
-			//Ignore EEPROM commands
-			if (address == 0x202AAA || address == 0x205555)
-			{
-	//			system_debug_message("%06X: Enable EEPROM command from %06X", pc, address);
-				memory_flash_command = TRUE;
-				return NULL;
-			}
-
-			//Set EEPROM status reading?
-			if (address == 0x220000 || address == 0x230000)
-			{
-	//			system_debug_message("%06X: EEPROM status read from %06X", pc, address);
-				eepromStatusEnable = TRUE;
-				return NULL;
-			}
-
-			if (memory_flash_command)
-			{
-				//Write the 256byte block around the flash data
-				flash_write(address & 0xFFFF00, 256);
-				
-				//Need to issue a new command before writing will work again.
-				memory_flash_command = FALSE;
-		
-	//			system_debug_message("%06X: Direct EEPROM write to %06X", pc, address & 0xFFFF00);
-	//			system_debug_stop();
-
-				//Write to the rom itself.
-				if (address <= ROM_START + rom.length)
-					return rom.data + (address - ROM_START);
-			}
-		}
-	}
-
-	// ===================================
-
-#ifdef NEOPOP_DEBUG
-	memory_error(address, FALSE);
-#endif
-	return NULL;
-}
+// memory_error(), translate_address_read()/write() and loadX()/storeX() all
+// moved to mem.h as 'static inline' -- see the "01 AUG 2026" note at the top
+// of that file for why (RISC-V call overhead vs. Xtensa register windows).
 
 //=============================================================================
 
@@ -315,73 +142,6 @@ void post_write(_u32 address)
 	//z80 - NMI
 	if (address == 0xBA)
 		Z80_nmi();
-}
-
-//=============================================================================
-
-_u8 loadB(_u32 address)
-{
-	_u8* ptr = translate_address_read(address);
-	if (ptr == NULL)
-		return 0;
-	else
-		return *ptr;
-}
-
-_u16 loadW(_u32 address)
-{
-	_u16* ptr = translate_address_read(address);
-	if (ptr == NULL)
-		return 0;
-	else
-		return le16toh(*ptr);
-}
-
-_u32 loadL(_u32 address)
-{
-	_u32* ptr = translate_address_read(address);
-	if (ptr == NULL)
-		return 0;
-	else
-		return le32toh(*ptr);
-}
-
-//=============================================================================
-
-void storeB(_u32 address, _u8 data)
-{
-	_u8* ptr = translate_address_write(address);
-
-	//Write
-	if (ptr)
-	{
-		*ptr = data;
-		post_write(address);
-	}
-}
-
-void storeW(_u32 address, _u16 data)
-{
-	_u16* ptr = translate_address_write(address);
-
-	//Write
-	if (ptr)
-	{
-		*ptr = htole16(data);
-		post_write(address);
-	}
-}
-
-void storeL(_u32 address, _u32 data)
-{
-	_u32* ptr = translate_address_write(address);
-
-	//Write
-	if (ptr)
-	{
-		*ptr = htole32(data);
-		post_write(address);
-	}
 }
 
 //=============================================================================

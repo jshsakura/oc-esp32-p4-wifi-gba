@@ -310,7 +310,17 @@ RomHeader;
 #define SCREEN_HEIGHT	152
 
 	//16-bit Frame buffer: Format X4B4G4R4
-	extern _u16 cfb[256*256];
+	//
+	// Sized to the visible screen (SCREEN_WIDTH x SCREEN_HEIGHT), not the
+	// historical 256x256. gfx_draw_scanline_{colour,mono}.c always compute
+	// cfb_scanline as "cfb + scanline * SCREEN_WIDTH" and only ever write
+	// [0, SCREEN_WIDTH) within it (see cfb_scanline usage, and system_VBL()
+	// in main.c which reads it back with the same 160-wide stride) -- the
+	// 256x256 declaration was allocating ~83KB that nothing ever touched.
+	// This buffer is internal RAM (not PSRAM) either way, so this is not a
+	// speed fix; it is here because internal RAM is the tight budget on
+	// this chip (docs/ROADMAP.md section 3) and ~83KB was sitting idle.
+	extern _u16 cfb[SCREEN_WIDTH * SCREEN_HEIGHT];
 
 	extern COLOURMODE system_colour;
 
