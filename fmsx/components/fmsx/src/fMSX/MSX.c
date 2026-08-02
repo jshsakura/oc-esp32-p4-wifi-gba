@@ -100,6 +100,13 @@ const char *WorkDir;               /* Working directory      */
 /** Cartridge files used by fMSX *****************************/
 const char *ROMName[MAXCARTS] = { "CARTA.ROM","CARTB.ROM" };
 
+/* How many of ROMName[] were actually requested on the command line, as   */
+/* opposed to left at their compiled-in placeholder. Only those slots'    */
+/* LoadCart() failures are a real "bad ROM"; an unrequested slot is       */
+/* expected to fail to open and must not be reported as one. Set once by  */
+/* main() in fMSX.c after parsing argv, before StartMSX() is called.      */
+int UserCartCount = 0;
+
 /** On-cartridge SRAM data ***********************************/
 char *SRAMName[MAXSLOTS] = {0,0,0,0,0,0};/* Filenames (gen-d)*/
 byte SaveSRAM[MAXSLOTS] = {0,0,0,0,0,0}; /* Save SRAM on exit*/
@@ -413,6 +420,7 @@ int StartMSX(int NewMode,int NewRAMPages,int NewVRAMPages)
   int *T,I,J,K;
   byte *P;
   word A;
+  int CartLoadFailed = 0;
 
   /*** STARTUP CODE starts here: ***/
 
@@ -550,8 +558,12 @@ int StartMSX(int NewMode,int NewRAMPages,int NewVRAMPages)
   if(WorkDir && chdir(WorkDir))
   { if(Verbose) printf("Failed changing to '%s' directory!\n",WorkDir); }
 
-  /* For each user cartridge slot, try loading cartridge */
-  for(J=0;J<MAXCARTS;++J) LoadCart(ROMName[J],J,ROMGUESS(J)|ROMTYPE(J));
+  /* For each user cartridge slot, try loading cartridge. Slots the user  */
+  /* didn't ask for are expected to fail (they still hold the compiled-in */
+  /* placeholder name) so only a failure within UserCartCount is fatal.   */
+  for(J=0;J<MAXCARTS;++J)
+    if(!LoadCart(ROMName[J],J,ROMGUESS(J)|ROMTYPE(J))&&(J<UserCartCount))
+      CartLoadFailed=1;
 
   /* Open stream for a printer */
   if(Verbose)
@@ -597,6 +609,11 @@ int StartMSX(int NewMode,int NewRAMPages,int NewVRAMPages)
     printf("  %d CPU cycles per VBlank\n",VPeriod);
     printf("  %d scanlines\n",VPeriod/HPeriod);
   }
+
+  /* Bail out before running any code if the user's cartridge never made */
+  /* it into a slot -- otherwise the CPU just runs with nothing inserted, */
+  /* which looks like a hang instead of the load error it actually is.   */
+  if(CartLoadFailed) return(0);
 
   /* Start execution of the code */
   if(Verbose) printf("RUNNING ROM CODE...\n");

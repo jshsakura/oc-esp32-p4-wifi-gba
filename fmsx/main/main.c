@@ -477,7 +477,12 @@ void app_main(void)
     audioQueue = rg_task_create("audioTask", &audioTask, NULL, 4096, RG_TASK_PRIORITY_2, 1);
 
     RG_LOGI("fMSX start");
-    fmsx_main(argc, (char **)argv);
+    // fmsx_main() returns 0 on a normal exit and non-zero if the user's
+    // cartridge/disk never made it into a slot (bad file, unsupported
+    // mapper, ...). Without this check a bad ROM used to leave the
+    // emulator running with nothing inserted instead of reporting anything.
+    if (fmsx_main(argc, (char **)argv) != 0)
+        rg_system_rom_load_failed(_("Unable to load the ROM or disk image."));
 
     RG_LOGI("fMSX ended");
     rg_system_exit();

@@ -109,6 +109,26 @@ static void application_init(retro_app_t *app)
     rg_storage_scandir(app->paths.saves, scan_saves_cb, app, RG_SCANDIR_RECURSIVE);
     // rg_storage_scandir(app->paths.covers, scan_folder_cb3, app, RG_SCANDIR_RECURSIVE);
 
+    // This board has no buttons or screen, so nobody can browse a tab to see what is on
+    // the card -- the serial log is the only way to find out. Print the first actual ROM
+    // file this scan found (skip subfolders), full path, so a host script can boot.json a
+    // real filename instead of guessing one from the folder listing.
+    {
+        const retro_file_t *first_rom = NULL;
+        for (size_t i = 0; i < app->files_count; i++)
+        {
+            if (app->files[i].type == RETRO_TYPE_FILE)
+            {
+                first_rom = &app->files[i];
+                break;
+            }
+        }
+        if (first_rom)
+            RG_LOGI("Tab '%s': first ROM found: %s/%s", app->short_name, first_rom->folder, first_rom->name);
+        else
+            RG_LOGI("Tab '%s': no ROMs found in %s", app->short_name, app->paths.roms);
+    }
+
     app->use_crc_covers = rg_storage_exists(strcat(app->paths.covers, "/0"));
     app->paths.covers[strlen(app->paths.covers) - 2] = 0;
 
@@ -702,7 +722,7 @@ static void application(const char *desc, const char *name, const char *exts, co
 
 void applications_init(void)
 {
-    application("Nintendo Entertainment System", "nes", "nes fc fds nsf zip", "retro-core", 16);
+    application("Nintendo Entertainment System", "nes", "nes fc fds nsf zip", "fceumm-go", 16);
     application("Super Nintendo", "snes", "smc sfc zip", "retro-core", 0);
     application("Nintendo Gameboy", "gb", "gb gbc zip", "retro-core", 0);
     application("Nintendo Gameboy Color", "gbc", "gbc gb zip", "retro-core", 0);
@@ -722,6 +742,7 @@ void applications_init(void)
     application("Pokemon Mini", "poke", "min zip", "pkmini-go", 0);
     application("Bandai WonderSwan", "wsc", "ws wsc zip", "wswan-go", 0);
     application("Nintendo Virtual Boy", "vb", "vb bin zip", "vb-go", 0);
+    application("Magnavox Odyssey2", "videopac", "bin rom zip", "videopac-go", 0);
     application("MSX", "msx", "rom mx1 mx2 dsk", "fmsx", 0);
     // Carts are either .p8 text or .p8.png, where the cart is steganographed into the pixels
     // of the label image -- so "png" here is a cart extension, not a cover.
@@ -731,5 +752,18 @@ void applications_init(void)
     // application("Bootstrap", "apps", "bin elf", "bootstrap", 0);
 
     if (!rg_system_get_app()->lowMemoryMode)
+    {
+        // application_init() (and the "first ROM found" log inside it) has always run
+        // lazily, from TAB_INIT, the moment a tab is first browsed into. That requires
+        // buttons. This board doesn't have any, so nothing would ever trigger it and the
+        // card's contents would stay unknown to anyone who isn't holding the SD reader.
+        // Force every tab's scan now instead, at boot, unconditionally. Skipped in
+        // low-memory mode for the same reason crc_cache_init() below is: keeping every
+        // tab's file list allocated at once is the PSRAM-heavy case that mode avoids, and
+        // a board without PSRAM is a board that has RAM to spare for buttons anyway.
+        for (int i = 0; i < apps_count; i++)
+            application_init(apps[i]);
+
         crc_cache_init();
+    }
 }

@@ -582,5 +582,15 @@ void app_main()
 #endif
 
     Z_Init();
+
+    // D_DoomMain() never returns normally (it ends the process via
+    // I_SafeExit()/exit()). The one path that does come back here is
+    // I_Error() longjmp-ing to this point -- it's the engine's catch-all
+    // for a missing/corrupt WAD as well as any other fatal error it hits,
+    // so we report whatever message it left us and return to the launcher
+    // instead of letting it panic.
+    if (setjmp(i_error_recovery_point))
+        rg_system_rom_load_failed(i_error_recovery_msg);
+
     D_DoomMain();
 }

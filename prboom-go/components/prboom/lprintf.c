@@ -52,6 +52,11 @@
 
 int cons_output_mask = -1;        /* all output enabled */
 
+#ifdef RETRO_GO
+jmp_buf i_error_recovery_point;
+char i_error_recovery_msg[256];
+#endif
+
 
 void lprintf(OutputLevels lvl, const char *s, ...)
 {
@@ -84,12 +89,16 @@ void I_Error(const char *error, ...)
   va_list arg;
   va_start(arg, error);
 #ifdef RETRO_GO
-  char buffer[256];
-  vsnprintf(buffer, sizeof(buffer), error, arg);
-  RG_PANIC(buffer);
+  vsnprintf(i_error_recovery_msg, sizeof(i_error_recovery_msg), error, arg);
+  va_end(arg);
+  // Hand the message to whoever set up i_error_recovery_point (app_main(),
+  // wrapped around D_DoomMain()) instead of panicking: this is how the
+  // engine reports a bad WAD, and also how it reports any other fatal error,
+  // so both come back as a dialog and a return to the launcher.
+  longjmp(i_error_recovery_point, 1);
 #else
   vprintf(error, arg);
+  va_end(arg);
   abort();
 #endif
-  va_end(arg);
 }

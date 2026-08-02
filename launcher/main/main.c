@@ -8,6 +8,7 @@
 
 #ifdef ESP_PLATFORM
 #include <esp_heap_caps.h>
+#include <nvs_flash.h>
 #endif
 
 #include "applications.h"
@@ -502,6 +503,66 @@ static void about_handler(rg_gui_option_t *dest)
     *dest++ = (rg_gui_option_t)RG_DIALOG_END;
 }
 
+#ifdef ESP_PLATFORM
+// This board has no buttons, no screen, and its SD card cannot be removed, so a person can
+// only reach the card through the firmware itself. The NVS partition is a second channel
+// that does not have that problem: it is already flashed on every retro-go image (it was
+// sitting there unused except for wifi calibration data), and esptool.py can write straight
+// to its known offset from the host without going anywhere near the card. So the host
+// writes a "bootreq" namespace there with nvs_partition_gen.py + `esptool.py write_flash`,
+// and this reads it back once, at the same point in boot as the PSRAM and display probes.
+//
+// The fields mirror boot.json from docs/BRINGUP.md 0.2 exactly (BootName/BootArgs/BootSlot/
+// BootFlags) plus the OTA partition name, because rg_system_switch_app() already knows how
+// to turn those five values into a boot.json write and an esp_ota_set_boot_partition() call
+// -- the same call the launcher's own "start game" menu uses. Re-using it means this can't
+// disagree with the normal boot path.
+//
+// Self-clearing in the same spirit as rg_psram_exec_test and the display bench marker: the
+// request is erased and committed *before* it is acted on, whether or not it was even valid.
+// A bad partition name, a typo'd path, or a ROM that crashes on load costs exactly one bad
+// boot -- the next boot has nothing left to retry and lands in the launcher normally. That
+// is the whole point: no choice the host makes here can brick the device into a loop.
+static void check_boot_request(void)
+{
+    // Not yet brought up this early in app_main -- rg_network_init() normally does this,
+    // but only runs later, and only if networking is compiled in.
+    if (nvs_flash_init() != ESP_OK && nvs_flash_erase() == ESP_OK)
+        nvs_flash_init();
+
+    nvs_handle_t handle;
+    if (nvs_open("bootreq", NVS_READWRITE, &handle) != ESP_OK)
+        return; // Nothing was ever written -- the namespace itself doesn't exist yet.
+
+    char part[24] = {0}, name[16] = {0}, args[RG_PATH_MAX] = {0};
+    size_t part_len = sizeof(part), name_len = sizeof(name), args_len = sizeof(args);
+    int32_t slot = -1;
+    uint32_t flags = 0;
+
+    esp_err_t err = nvs_get_str(handle, "part", part, &part_len);
+    if (err == ESP_OK)
+        err = nvs_get_str(handle, "name", name, &name_len);
+    if (err == ESP_OK)
+        err = nvs_get_str(handle, "args", args, &args_len);
+    nvs_get_i32(handle, "slot", &slot);   // Optional; -1 ("new game") stands if absent.
+    nvs_get_u32(handle, "flags", &flags); // Optional; 0 stands if absent.
+
+    // Erase the whole namespace regardless of whether the read above succeeded: a
+    // half-written request (host reset mid-flash, one key missing) must not be retried
+    // either, since we can't tell "half-written" from "deliberately partial" from here.
+    nvs_erase_all(handle);
+    nvs_commit(handle);
+    nvs_close(handle);
+
+    if (err != ESP_OK)
+        return; // Namespace existed but a required key didn't -- nothing safe to act on.
+
+    RG_LOGI("Host boot request: partition=%s name=%s args=%s slot=%d flags=%u",
+            part, name, args, (int)slot, (unsigned)flags);
+    rg_system_switch_app(part, name, args, (int)slot, flags); // noreturn: reboots into it.
+}
+#endif
+
 void app_main(void)
 {
     const rg_handlers_t handlers = {
@@ -524,6 +585,14 @@ void app_main(void)
         rg_storage_mkdir(RG_BASE_PATH_CACHE);
         rg_storage_mkdir(RG_BASE_PATH_CONFIG);
         try_migrate();
+
+#ifdef ESP_PLATFORM
+        // Checked first and ahead of the probes below: if the host is waiting to boot a
+        // specific ROM, that is a real task someone wants done, not a diagnostic. Requires
+        // /sd to be mounted since it writes boot.json through rg_settings, same as the
+        // probes needing it for their own log/result files.
+        check_boot_request();
+#endif
 
         // Does nothing unless /sd/retro-go/psram_exec_test is there to ask it to. Before the
         // splash, so a probe that faults does not do it behind a logo.

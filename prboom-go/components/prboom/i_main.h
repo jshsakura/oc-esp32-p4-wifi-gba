@@ -39,4 +39,19 @@
 void I_Init(void);
 void I_SafeExit(int rc);
 
+#ifdef RETRO_GO
+#include <setjmp.h>
+
+/* I_Error() is the engine's only "this is fatal, stop now" signal -- it is
+ * called both for a missing/corrupt WAD at startup and for unrelated fatal
+ * errors deep in a running game, and it never returns to its caller. Rather
+ * than add a checked return path to every call site between D_DoomMain() and
+ * the WAD loader (which is most of the engine), the retro-go glue installs a
+ * jump point here before calling D_DoomMain(); I_Error() longjmps to it with
+ * a message instead of aborting, so the failure can be reported to the user
+ * and returned to the launcher like any other bad ROM. */
+extern jmp_buf i_error_recovery_point;
+extern char i_error_recovery_msg[256];
+#endif
+
 #endif

@@ -264,10 +264,16 @@ int main(int argc,char *argv[])
   if(DiskCount[0]) { Disks[0][DiskCount[0]]=0;DSKName[0]=Disks[0][0]; }
   if(DiskCount[1]) { Disks[1][DiskCount[1]]=0;DSKName[1]=Disks[1][0]; }
 
-  /* Start fMSX! */
+  /* Let StartMSX() know how many ROMName[] slots were actually requested */
+  /* by the user, so it can tell a real cartridge load failure apart from */
+  /* an unused slot that was never going to have a file to open. */
+  UserCartCount = CartCount;
+
+  /* Start fMSX! StartMSX() returns 0 if the user's cartridge failed to  */
+  /* load, matching the failure code InitMachine() already used above.  */
   if(!InitMachine()) return(1);
-  StartMSX(Mode,RAMPages,VRAMPages);
+  N = StartMSX(Mode,RAMPages,VRAMPages);
   TrashMSX();
   TrashMachine();
-  return(0);
+  return(N? 0:1);
 }
