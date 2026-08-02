@@ -230,8 +230,25 @@ CONFIG_SPI_SLAVE_IN_IRAM=n
 
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_HEX=y
-CONFIG_SPIRAM_SPEED_80M=y
-CONFIG_SPIRAM_SPEED=80
+# 20, not 80, and this is a loss worth understanding rather than a setting.
+#
+# 80MHz is stable for the launcher, gbsp, gwenesis and ngpocket-go, and it is worth about
+# three times on everything that touches PSRAM -- the display blit went from 23.4ms to 7.7ms
+# a frame on GBA, which is the difference between 60fps being reachable and not (A13/A14).
+#
+# It boot-loops retro-core. Reproducibly, on a freshly written partition, with flash at both
+# 120MHz and 40MHz, so it is not MSPI contention with the flash. The second-stage bootloader
+# stops after `entry 0x4ff29ed0` without printing one line of its own and the watchdog takes
+# it -- the app never starts, so this is the loader reading a 1.7MB image, not anything
+# retro-core does. Every other app is around 1MB.
+#
+# retro-core carries eleven of the twenty-two systems, so 80MHz cannot ship until that is
+# understood. Next step is esp-idf's own MSPI timing diagnostics, which are ESP_EARLY_LOGD
+# and therefore compiled out at this project's log level -- build once with the log level
+# raised and compare the tuning point the bootloader picks on a launcher boot against a
+# retro-core boot.
+CONFIG_SPIRAM_SPEED_20M=y
+CONFIG_SPIRAM_SPEED=20
 CONFIG_SPIRAM_BOOT_HW_INIT=y
 CONFIG_SPIRAM_BOOT_INIT=y
 CONFIG_SPIRAM_PRE_CONFIGURE_MEMORY_PROTECTION=y

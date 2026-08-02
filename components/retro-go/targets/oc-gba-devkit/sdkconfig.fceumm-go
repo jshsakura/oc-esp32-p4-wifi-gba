@@ -1,0 +1,15 @@
+# Per-app sdkconfig overlay for fceumm-go (see rg_tool.py sdkconfig_defaults_for()).
+#
+# fceumm's BSS footprint is ~1.85 MiB (ARead/BWrite 512 KiB CPU dispatch tables,
+# dphaseTable/tllTable 384 KiB OPLL lookup tables, fceumm_flash_buf 513 KiB for
+# UNROM-512, WaveHi 160 KiB sound buffer, etc.). Internal SRAM on the ESP32-P4 is
+# only ~512 KiB, so once fceumm's .bss fills it the linker (--enable-non-
+# contiguous-regions) starts discarding .sbss from the ESP-IDF system libraries
+# and the link fails with ~1.7 MiB of "discards section" errors.
+#
+# Enabling BSS-in-PSRAM gives the linker a second DRAM region (extern_ram_seg)
+# so .bss can overflow into the 8 MiB PSRAM instead of evicting system .sbss.
+# This matches the esp32-p4backup target's setting.
+
+CONFIG_ESP_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
