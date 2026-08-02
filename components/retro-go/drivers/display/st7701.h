@@ -216,6 +216,31 @@ static inline uint16_t *lcd_get_buffer(size_t length)
     return temp_buffer;
 }
 
+// The panel's own framebuffer, for a caller that can write it directly instead of handing
+// rows to lcd_send_buffer -- the PPA blit in rg_display.c does exactly that, since the DMA
+// can scale and rotate into it in one pass. NULL when there is no framebuffer at all, which
+// is the one case that caller must handle.
+//
+// It holds native RGB565: lcd_send_buffer() swaps the bytes back on the way in, because the
+// line buffer it is given is big-endian for the SPI panels this driver family grew up with.
+#define RG_SCREEN_HAS_FRAMEBUFFER 1
+
+static inline bool lcd_has_panel(void)
+{
+    return st7701_ctx.initialized;
+}
+
+static inline uint16_t *lcd_get_framebuffer(int *width, int *height)
+{
+    if (!st7701_ctx.framebuffer)
+        return NULL;
+    if (width)
+        *width = ST7701_LCD_H_RES;
+    if (height)
+        *height = ST7701_LCD_V_RES;
+    return st7701_ctx.framebuffer;
+}
+
 static inline void lcd_send_buffer(uint16_t *buffer, size_t length)
 {
     if (!buffer || !st7701_ctx.framebuffer || length == 0) return;
@@ -395,7 +420,25 @@ static void lcd_init(void)
         if (init_task)
             vTaskPrioritySet(init_task, tskIDLE_PRIORITY + 1);
 
-        st7701_ctx.framebuffer = NULL;
+        // Draw into a scratch buffer instead of nowhere. Nothing is displayed either way,
+        // but with a NULL framebuffer lcd_send_buffer() returns on its first line and the
+        // rotation -- turning every logical row into a panel column, the expensive half of
+        // the blit -- never runs. Every timing taken on a panel-less board was therefore
+        // reading low, and any path that writes the framebuffer directly could not be
+        // exercised at all. A megabyte of PSRAM buys measurements that mean something.
+        // Cache-line aligned, like the one the DPI panel would have handed us: the PPA is a
+        // DMA and refuses a destination that is not ("out.buffer addr or out.buffer_size not
+        // aligned to cache line size" -- it said so on hardware, every frame).
+        st7701_ctx.framebuffer_size = ST7701_LCD_H_RES * ST7701_LCD_V_RES * sizeof(uint16_t);
+        st7701_ctx.framebuffer = heap_caps_aligned_alloc(RG_TARGET_CACHE_LINE_SIZE,
+            st7701_ctx.framebuffer_size, MALLOC_CAP_SPIRAM);
+        if (st7701_ctx.framebuffer) {
+            memset(st7701_ctx.framebuffer, 0, st7701_ctx.framebuffer_size);
+            RG_LOGW("No panel: drawing into a scratch framebuffer at %p so timings stay honest",
+                    st7701_ctx.framebuffer);
+        } else {
+            st7701_ctx.framebuffer_size = 0;
+        }
         st7701_ctx.initialized = false;
         return;
     }

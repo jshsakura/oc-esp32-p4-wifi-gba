@@ -96,6 +96,47 @@ if (!rg_storage_exists(path)) {
 파티션 크기는 `build-img`가 실제 바이너리 크기에서 계산하므로, **앱 하나만 굽지 말고 이미지를 다시
 말아서 통째로 구울 것.**
 
+### 0.3-1 sdkconfig를 고쳤는데 아무 일도 안 일어난다면
+
+**esp-idf는 `SDKCONFIG_DEFAULTS`를 앱의 `sdkconfig`를 만들 때 딱 한 번만 적용한다.** 이미 있는
+파일에는 다시 적용하지 않는다. 그래서 `targets/<타겟>/sdkconfig`를 고쳐도 **생성된
+`<앱>/sdkconfig`가 남아 있으면 아무 효과가 없다** — 옵션이 적용되지 않은 채로 같은 링크 에러가
+계속 나온다. 실제로 이걸로 네 번 연속 똑같은 실패를 보고 원인을 엉뚱한 데서 찾았다.
+
+`rg_tool.py`가 이제 **defaults 파일 내용의 해시를 `sdkconfig.rgtarget`에 같이 적어두고**, 달라지면
+재생성한다. 옛 체크아웃에서 온 파일이 섞였다면 `rm -f */sdkconfig` 한 번이면 된다.
+
+### 0.3-2 "discarded sections"는 메모리 부족이라는 뜻이다
+
+링커가 이렇게 말한다:
+
+```
+ld: error: --enable-non-contiguous-regions discards section `.sdata.s_panic_uart' ...
+ld: error: Total discarded sections size is 775 bytes
+```
+
+**내부 RAM이 모자란다는 뜻이고, 모자란 양이 마지막 줄의 숫자다.** 그런데 `idf.py size`는
+DIRAM 56% 사용에 252KB 남았다고 말한다 — 둘 다 맞다. 진짜 한계는 **`sram_low` 하나**다:
+
+| 영역 | 크기 | 들어가는 것 |
+|---|---|---|
+| `sram_low` | 0x4FF00000~0x4FF2CBD0 = **183KB** | `.iram0.text` + `.dram0.data`(여기에 `.sdata`) |
+| `sram_high` | 0x4FF40000~ = 384KB (L2 128KB 제외) | `.dram1.data` / `.dram1.bss` |
+
+`.sdata`는 `sram_low`에만 규칙이 있어서 넘치면 `sram_high`로 못 흘러가고 **버려진다.** 그리고
+retro-core의 `.iram0.text`가 이미 **176KB** — 여유가 6KB뿐이다. 누가 쓰는지는
+`python3 -m esp_idf_size --archives build/<앱>.map`:
+
+```
+libsnes9x.a   IRAM0 .text  41408      libesp_hw_support.a  20856
+libnofrendo.a              20240      libfreertos.a        16738
+```
+
+**에뮬레이터 코어가 핫루프를 IRAM에 올린 것은 의도된 것이니 건드리지 말 것.** 갚을 곳은 시스템
+쪽이다. PPA 드라이버(디스플레이 블릿)를 링크하느라 775바이트가 필요했을 때는 힙 코드 7.9KB를
+플래시로 내려서 갚았다(`CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y`). `CONFIG_FREERTOS_IN_IRAM`은
+**Kconfig에서 prompt가 없는 invisible 옵션이라 sdkconfig에 써도 무시된다** — 시도해봤다.
+
 ### 0.4 로그 읽기
 
 ```sh
@@ -458,6 +499,42 @@ SMS/GG/CV/MSX도 근접하지만, **SNES와 메가드라이브는 티어 A가 �
 - 패닉 트레이스가 로그에 남는지 (`begin_panic_trace`, `rg_system.c:109`)
 
 임시 코드가 필요하다. dev 빌드에서만.
+
+### A13. 디스플레이 블릿 — ✅ 2026-08-02. **그동안 절반만 재고 있었다**
+
+**패널 없는 보드에서 잰 블릿 수치는 전부 낮게 나온 값이었다.** `st7701_ctx.framebuffer`가
+NULL이면 `lcd_send_buffer()`가 첫 줄에서 돌아가고, **논리 행을 패널 열로 바꾸는 전치가 통째로
+안 돈다.** 스케일·팔레트 변환만 재고 회전은 안 잰 것이다. 이제 패널이 없으면 스크래치
+프레임버퍼(768KB PSRAM)를 잡아서 끝까지 돌린다 — 보이지 않을 뿐 일은 다 한다.
+
+`rg_display_bench.c`가 기종 크기별 8비트 팔레트 서피스를 60프레임씩 밀어넣고 디스플레이 태스크의
+busy 카운터를 나눈다. **롬도 버튼도 패널도 필요 없다.** `/retro-go/display_bench`를 만들어두면
+돌고, 카드를 못 뺄 때를 위해 **패널이 응답하지 않으면 그냥 돈다.**
+
+| 기종 | 소스 → 출력 | CPU | PPA |
+|---|---|---|---|
+| PICO-8 | 128×128 → 480×480 | 20.67ms | **9.88ms** |
+| GBA | 240×160 → 720×480 | 52.58ms | **23.51ms** |
+| NES/SNES | 256×224 → 512×448 | 37.60ms | **27.15ms** |
+| 메가드라이브 | 320×224 → 640×448 | 48.02ms | **34.37ms** |
+| 게임앤워치 | 320×240 → 640×480 | 49.74ms | **37.03ms** |
+
+읽는 법 세 가지.
+
+1. **PPA는 이 칩에서 실제로 돈다.** 스케일 + 270도 회전 + 저장이 트랜잭션 하나로 처리되고,
+   벤치 60프레임 전부 PPA가 가져갔다(`ppa 60 cpu 0`).
+2. **그래도 60fps 예산 16.6ms에는 아직 아무도 못 들어온다.** GBA가 23.5ms다.
+3. **회전이 유력한 범인이다.** 출력 픽셀당 비용이 PICO-8 0.043µs에서 NES 0.118µs로 3배 벌어지는데,
+   DMA가 세로로 쓰면 픽셀마다 캐시라인 하나를 건드린다. CPU 전치가 비쌌던 이유와 같은 이유다.
+   **다음: 회전 0으로 같은 크기를 재서 회전 비용만 분리할 것.**
+
+가는 길에 걸린 것 둘.
+
+- PPA 목적지는 **캐시라인 정렬**이어야 한다. 아니면 매 프레임 `out.buffer addr or out.buffer_size
+  not aligned to cache line size`가 찍히고 조용히 CPU로 폴백한다. 스크래치 프레임버퍼를
+  `heap_caps_aligned_alloc`으로 잡아 해결.
+- **PPA는 8비트 팔레트를 못 받는다** — 실리콘에 CLUT 모드가 없다. 팔레트는 CPU가 편다. 대신
+  **출력이 아니라 소스 한 번**이라 최대 9분의 1이다.
 
 ---
 

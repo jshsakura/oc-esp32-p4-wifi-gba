@@ -21,9 +21,15 @@ static rg_display_config_t config;
 // static rg_surface_t *osd;
 static rg_surface_t *border;
 static rg_display_t display;
-static int16_t map_viewport_to_source_x[RG_SCREEN_WIDTH + 1];
-static int16_t map_viewport_to_source_y[RG_SCREEN_HEIGHT + 1];
-static uint32_t screen_line_checksum[RG_SCREEN_HEIGHT + 1];
+// All three used to be static arrays in internal RAM, 4.4KB of a budget with nothing left in
+// it: linking the PPA driver into retro-core put it 775 bytes over and the link failed on
+// sections it could no longer place. They are in PSRAM now, and that is affordable for a
+// reason worth writing down -- 4.4KB of tables read every frame stay resident in the 128KB
+// L2 cache. The 43x penalty this chip charges for PSRAM is a *streaming* penalty (BRINGUP
+// A1); it is not what a small hot table pays.
+static int16_t *map_viewport_to_source_x;
+static int16_t *map_viewport_to_source_y;
+static uint32_t *screen_line_checksum;
 
 #define LINE_IS_REPEATED(Y) (map_viewport_to_source_y[(Y)] == map_viewport_to_source_y[(Y) - 1])
 // This is to avoid flooring a number that is approximated to .9999999 and be explicit about it
@@ -56,6 +62,27 @@ static inline void lcd_send_buffer(uint16_t *buffer, size_t length);
 #include "drivers/display/dummy.h"
 #endif
 
+// The ESP32-P4's PPA is a 2D-DMA that scales, rotates and mirrors in one transaction. Where
+// the driver hands us its framebuffer we can point that transaction straight at it, and the
+// CPU stops touching pixels entirely.
+#if defined(RG_SCREEN_HAS_FRAMEBUFFER) && defined(CONFIG_IDF_TARGET_ESP32P4)
+#define RG_DISPLAY_PPA 1
+#include "driver/ppa.h"
+#include "esp_cache.h"
+#include "esp_heap_caps.h"
+#ifndef RG_TARGET_CACHE_LINE_SIZE
+#define RG_TARGET_CACHE_LINE_SIZE 64
+#endif
+#define PPA_ALIGN_UP(x) (((x) + RG_TARGET_CACHE_LINE_SIZE - 1) & ~(RG_TARGET_CACHE_LINE_SIZE - 1))
+static ppa_client_handle_t ppa_client;
+static uint16_t *ppa_source_buffer;
+static size_t ppa_source_buffer_size;
+static bool ppa_drew_last_frame;
+static int32_t ppa_frames_done, ppa_frames_skipped;
+static const char *ppa_skip_reason = "not tried";
+#define PPA_SKIP(why) do { ppa_skip_reason = (why); return false; } while (0)
+#endif
+
 static inline unsigned blend_pixels(unsigned a, unsigned b)
 {
     // Fast path (taken 80-90% of the time)
@@ -73,6 +100,170 @@ static inline unsigned blend_pixels(unsigned a, unsigned b)
     // This is my attempt at averaging two 565BE values without swapping bytes (3x the speed of the code above)
     // return (((a ^ b) & 0b1101111011110110U) >> 1) + (a & b);
 }
+
+#ifdef RG_DISPLAY_PPA
+// Scale, rotate and store in a single PPA transaction, straight into the panel's framebuffer.
+// What the CPU path spends seven to eight cycles per *output* pixel on -- palette lookup,
+// scaling, byte swap, and turning each logical row into a panel column because the panel is
+// mounted a quarter turn -- the DMA does without the CPU.
+//
+// Two things the hardware cannot do, and both fall back to the CPU path rather than being
+// approximated:
+//
+//   - 8-bit palette input. The SRM engine's colour modes are ARGB8888, RGB888, RGB565 and
+//     YUV420; there is no CLUT mode in the silicon (the blending engine has the register
+//     bits, but blending cannot scale). So a palette source is expanded here first -- one
+//     pass over the source, which is up to nine times smaller than the output the CPU path
+//     would have had to write.
+//   - our filters and the scanline effect. Those are a look, not a resampling, and PPA's
+//     interpolation is not the same thing.
+//
+// Returns false without having touched the framebuffer whenever it cannot do the whole job.
+static bool ppa_write_update(const rg_surface_t *update, int draw_left, int draw_top,
+                             int draw_width, int draw_height, int crop_left, int crop_top)
+{
+    int fb_width = 0, fb_height = 0;
+    uint16_t *framebuffer = lcd_get_framebuffer(&fb_width, &fb_height);
+    if (!ppa_client || !framebuffer)
+        PPA_SKIP("no client or no framebuffer");
+
+    // A DMA destination has to start on a cache line. Checked here rather than left to the
+    // driver, which rejects the transaction per frame and says so per frame in the log.
+    if ((uintptr_t)framebuffer & (RG_TARGET_CACHE_LINE_SIZE - 1))
+        PPA_SKIP("framebuffer not cache-line aligned");
+
+    const int format = update->format;
+    const int stride = update->stride;
+    const int src_width = update->width - crop_left * 2;
+    const int src_height = update->height - crop_top * 2;
+
+    if (src_width < 1 || src_height < 1 || draw_width < 1 || draw_height < 1)
+        PPA_SKIP("empty rectangle");
+
+    // The scale factor is eight integer bits and four fractional, so steps of 1/16 from
+    // 1/16x to 255.9375x. Every integer scale lands on it exactly and so does 3.75x, but a
+    // ratio that does not divide evenly would drift by a pixel across the picture -- let the
+    // CPU path, which walks a per-column lookup table, keep those.
+    if ((draw_width * 16) % src_width || (draw_height * 16) % src_height)
+        PPA_SKIP("scale is not a multiple of 1/16");
+
+    const int left = display.screen.margins.left + draw_left;
+    const int top = display.screen.margins.top + draw_top;
+
+#if RG_SCREEN_ROTATE == 90
+    // lcd_send_buffer() maps logical (lx, ly) to panel (fb_width - 1 - ly, lx) by hand: a
+    // quarter turn clockwise. PPA counts counter-clockwise, so clockwise 90 is 270. The
+    // block lands where that mapping sends the logical rectangle's far edge.
+    const ppa_srm_rotation_angle_t rotation = PPA_SRM_ROTATION_ANGLE_270;
+    const int out_x = fb_width - (top + draw_height);
+    const int out_y = left;
+    const int out_w = draw_height;
+    const int out_h = draw_width;
+#elif RG_SCREEN_ROTATE == 0
+    const ppa_srm_rotation_angle_t rotation = PPA_SRM_ROTATION_ANGLE_0;
+    const int out_x = left;
+    const int out_y = top;
+    const int out_w = draw_width;
+    const int out_h = draw_height;
+#else
+    return false;
+#endif
+
+    if (out_x < 0 || out_y < 0 || out_x + out_w > fb_width || out_y + out_h > fb_height)
+        PPA_SKIP("block falls outside the framebuffer");
+
+    // Everything reaches the DMA as packed native RGB565, so there is one input shape to
+    // reason about. The copy is over the source, not the output, and a source is at most
+    // 320x240 here -- the point of the exercise is that the output never gets walked.
+    const size_t needed = (size_t)src_width * src_height * sizeof(uint16_t);
+    if (ppa_source_buffer_size < needed)
+    {
+        free(ppa_source_buffer);
+        ppa_source_buffer = heap_caps_aligned_alloc(RG_TARGET_CACHE_LINE_SIZE,
+            PPA_ALIGN_UP(needed), MALLOC_CAP_SPIRAM);
+        ppa_source_buffer_size = ppa_source_buffer ? needed : 0;
+        if (!ppa_source_buffer)
+            PPA_SKIP("source buffer allocation failed");
+    }
+
+    const void *data = update->data + update->offset + (crop_top * stride);
+    uint16_t *dst = ppa_source_buffer;
+
+    if (format & RG_PIXEL_PALETTE)
+    {
+        // Palette entries are stored in the panel's big-endian order, because the CPU path
+        // writes them into a big-endian line buffer without swapping. The framebuffer is
+        // native, so the swap happens here instead of there.
+        const uint8_t *src = (const uint8_t *)data + crop_left;
+        const uint16_t *palette = update->palette;
+        for (int y = 0; y < src_height; ++y)
+        {
+            const uint8_t *row = src + (size_t)y * stride;
+            for (int x = 0; x < src_width; ++x)
+                *dst++ = __builtin_bswap16(palette[row[x]]);
+        }
+    }
+    else if (format == RG_PIXEL_565_LE)
+    {
+        const uint8_t *src = (const uint8_t *)data + crop_left * 2;
+        for (int y = 0; y < src_height; ++y)
+            memcpy(dst + (size_t)y * src_width, src + (size_t)y * stride, src_width * 2);
+    }
+    else if (format == RG_PIXEL_565_BE)
+    {
+        const uint8_t *src = (const uint8_t *)data + crop_left * 2;
+        for (int y = 0; y < src_height; ++y)
+        {
+            const uint16_t *row = (const uint16_t *)(src + (size_t)y * stride);
+            for (int x = 0; x < src_width; ++x)
+                *dst++ = __builtin_bswap16(row[x]);
+        }
+    }
+    else
+    {
+        PPA_SKIP("pixel format the engine does not take");
+    }
+
+    // The DMA reads memory, not our cache.
+    esp_cache_msync(ppa_source_buffer, PPA_ALIGN_UP(needed),
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+
+    ppa_srm_oper_config_t oper = {
+        .in = {
+            .buffer = ppa_source_buffer,
+            .pic_w = src_width,
+            .pic_h = src_height,
+            .block_w = src_width,
+            .block_h = src_height,
+            .block_offset_x = 0,
+            .block_offset_y = 0,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .out = {
+            .buffer = framebuffer,
+            .buffer_size = (size_t)fb_width * fb_height * sizeof(uint16_t),
+            .pic_w = fb_width,
+            .pic_h = fb_height,
+            .block_offset_x = out_x,
+            .block_offset_y = out_y,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .rotation_angle = rotation,
+        .scale_x = (float)draw_width / src_width,
+        .scale_y = (float)draw_height / src_height,
+        .mirror_x = false,
+        .mirror_y = false,
+        .rgb_swap = false,
+        .byte_swap = false,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+
+    if (ppa_do_scale_rotate_mirror(ppa_client, &oper) != ESP_OK)
+        PPA_SKIP("the driver rejected the transaction");
+    ppa_frames_done++;
+    return true;
+}
+#endif
 
 static inline void write_update(const rg_surface_t *update)
 {
@@ -101,6 +292,26 @@ static inline void write_update(const rg_surface_t *update)
         draw_height += draw_top * 2;
         draw_top = 0;
     }
+
+#ifdef RG_DISPLAY_PPA
+    if (!filter_x && !filter_y && config.scanline == RG_DISPLAY_SCANLINE_OFF &&
+        ppa_write_update(update, draw_left, draw_top, draw_width, draw_height, crop_left, crop_top))
+    {
+        // The per-line checksums below are how a partial update decides a line is unchanged.
+        // They describe lines this frame never wrote, so they have to stop being believed the
+        // moment the CPU path takes over again.
+        ppa_drew_last_frame = true;
+        counters.fullFrames++;
+        counters.busyTime += rg_system_timer() - time_start;
+        return;
+    }
+    ppa_frames_skipped++;
+    if (ppa_drew_last_frame)
+    {
+        memset(screen_line_checksum, 0, (RG_SCREEN_HEIGHT + 1) * sizeof(uint32_t));
+        ppa_drew_last_frame = false;
+    }
+#endif
 
     const int format = update->format;
     const int stride = update->stride;
@@ -345,7 +556,7 @@ static void update_viewport_scaling(void)
     display.viewport.filter_y = (config.filter == RG_DISPLAY_FILTER_VERT || config.filter == RG_DISPLAY_FILTER_BOTH) &&
                                 (config.scaling && (display.viewport.height % src_height) != 0);
 
-    memset(screen_line_checksum, 0, sizeof(screen_line_checksum));
+    memset(screen_line_checksum, 0, (RG_SCREEN_HEIGHT + 1) * sizeof(uint32_t));
 
     for (int x = 0; x < screen_width; ++x)
         map_viewport_to_source_x[x] = FLOAT_TO_INT(x * display.viewport.step_x);
@@ -413,10 +624,32 @@ static void display_task(void *arg)
     }
 }
 
+const char *rg_display_ppa_status(int *done, int *skipped)
+{
+#ifdef RG_DISPLAY_PPA
+    if (done) *done = (int)ppa_frames_done;
+    if (skipped) *skipped = (int)ppa_frames_skipped;
+    return ppa_skip_reason;
+#else
+    if (done) *done = 0;
+    if (skipped) *skipped = 0;
+    return "not built in";
+#endif
+}
+
+bool rg_display_has_panel(void)
+{
+#ifdef RG_SCREEN_HAS_FRAMEBUFFER
+    return lcd_has_panel();
+#else
+    return true;
+#endif
+}
+
 void rg_display_force_redraw(void)
 {
     display.changed = true;
-    // memset(screen_line_checksum, 0, sizeof(screen_line_checksum));
+    // memset(screen_line_checksum, 0, (RG_SCREEN_HEIGHT + 1) * sizeof(uint32_t));
     rg_system_event(RG_EVENT_REDRAW, NULL);
     rg_display_sync(true);
 }
@@ -472,7 +705,7 @@ void rg_display_set_scanline(int mode)
     config.scanline = RG_MIN(RG_MAX(mode, 0), RG_DISPLAY_SCANLINE_COUNT - 1);
     rg_settings_set_number(NS_APP, SETTING_SCANLINE, config.scanline);
     // Force a full redraw so the effect applies to the current frame.
-    memset(screen_line_checksum, 0xFF, sizeof(screen_line_checksum));
+    memset(screen_line_checksum, 0xFF, (RG_SCREEN_HEIGHT + 1) * sizeof(uint32_t));
 }
 
 int rg_display_get_scanline(void)
@@ -701,7 +934,33 @@ void rg_display_init(void)
     };
     display.screen.width -= display.screen.margins.left + display.screen.margins.right;
     display.screen.height -= display.screen.margins.top + display.screen.margins.bottom;
+
+    // Asked for by capability, not by plain calloc: a request this small comes back from
+    // internal RAM, which is the thing being economised. (The same trap as the SNES frame
+    // buffers -- see BRINGUP A11.)
+    map_viewport_to_source_x = rg_alloc((RG_SCREEN_WIDTH + 1) * sizeof(int16_t), MEM_SLOW);
+    map_viewport_to_source_y = rg_alloc((RG_SCREEN_HEIGHT + 1) * sizeof(int16_t), MEM_SLOW);
+    screen_line_checksum = rg_alloc((RG_SCREEN_HEIGHT + 1) * sizeof(uint32_t), MEM_SLOW);
+
     lcd_init();
+#ifdef RG_DISPLAY_PPA
+    ppa_client_config_t ppa_config = {
+        .oper_type = PPA_OPERATION_SRM,
+        .max_pending_trans_num = 1,
+        .data_burst_length = PPA_DATA_BURST_LENGTH_128,
+    };
+    if (ppa_register_client(&ppa_config, &ppa_client) == ESP_OK)
+    {
+        int fb_width = 0, fb_height = 0;
+        RG_LOGI("PPA blit available (framebuffer %p, %dx%d)", lcd_get_framebuffer(&fb_width, &fb_height),
+                fb_width, fb_height);
+    }
+    else
+    {
+        ppa_client = NULL;
+        RG_LOGW("PPA unavailable, the display stays on the CPU blit");
+    }
+#endif
     rg_display_clear(C_BLACK);
     rg_task_delay(80); // Wait for the screen be cleared before turning on the backlight (40ms doesn't seem to be enough...)
     lcd_set_backlight(config.backlight);

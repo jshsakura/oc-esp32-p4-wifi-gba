@@ -110,6 +110,13 @@ void rg_display_clear_except(int left, int top, int width, int height, uint16_t 
 void rg_display_clear(uint16_t color_le);
 bool rg_display_sync(bool block);
 void rg_display_force_redraw(void);
+// False when the driver came up without a panel answering. Everything still runs; nothing
+// is visible. Drivers that cannot tell say true.
+bool rg_display_has_panel(void);
+// Frames the PPA blit took, frames it handed back to the CPU, and why it last handed one back.
+const char *rg_display_ppa_status(int *done, int *skipped);
+// Times the blit per system-sized source and logs a table. See rg_display_bench.c.
+void rg_display_bench_run_if_requested(void);
 void rg_display_submit(const rg_surface_t *update, uint32_t flags);
 
 rg_display_counters_t rg_display_get_counters(void);

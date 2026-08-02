@@ -5,8 +5,10 @@ if((IDF_VERSION_MAJOR EQUAL 5) AND (IDF_VERSION_MINOR GREATER 2)) # esp-idf 5.3+
     # missing, so both failed to compile the moment they were selected -- the SPI driver
     # was the only one anybody had built.
     # esp_mm is for esp_cache.h, which rg_psram_exec_test.c needs to make code it just wrote
-    # as data visible to instruction fetch.
-    set(COMPONENT_REQUIRES "spi_flash fatfs app_update json nvs_flash esp_adc esp_timer esp_psram esp_wifi esp_http_client esp_driver_ledc esp_lcd esp_mm driver")
+    # as data visible to instruction fetch, and which the PPA blit needs for the same reason
+    # in the other direction: the DMA reads memory, not our cache.
+    # esp_driver_ppa is the ESP32-P4's 2D-DMA, used by that blit.
+    set(COMPONENT_REQUIRES "spi_flash fatfs app_update json nvs_flash esp_adc esp_timer esp_psram esp_wifi esp_http_client esp_driver_ledc esp_lcd esp_mm esp_driver_ppa driver")
 elseif(IDF_VERSION_MAJOR EQUAL 5) # esp-idf 5.0 - 5.2
     set(COMPONENT_REQUIRES "spi_flash fatfs app_update json nvs_flash esp_adc esp_timer esp_psram esp_wifi esp_http_client")
 else() # esp-idf 4.1 - 4.4

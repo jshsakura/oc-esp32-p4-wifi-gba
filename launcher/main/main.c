@@ -528,6 +528,10 @@ void app_main(void)
         // Does nothing unless /sd/retro-go/psram_exec_test is there to ask it to. Before the
         // splash, so a probe that faults does not do it behind a logo.
         rg_psram_exec_test();
+
+        // Likewise: nothing unless asked, or unless no panel answered -- in which case the
+        // blit's own numbers are the only ones anybody can read.
+        rg_display_bench_run_if_requested();
     }
 
     // Only on a real power-on. Coming back from an emulator is a software reset, and a

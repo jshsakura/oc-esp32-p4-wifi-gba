@@ -19,6 +19,9 @@ build/
 # Older images moved out of the root to keep it readable. Nothing here is needed to build.
 /images/
 
+# Agent worktrees live here, each a full checkout of this repo.
+/.claude/
+
 # SDL2 build
 /sd
 /stderr.txt

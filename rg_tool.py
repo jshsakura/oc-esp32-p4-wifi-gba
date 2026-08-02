@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import subprocess
 import shutil
 import glob
@@ -162,11 +163,25 @@ def clean_app(app):
     print("Done.\n")
 
 
+def _target_stamp(app, target):
+    """What this app's sdkconfig was generated from: the target, and the defaults' contents.
+
+    The contents matter because esp-idf applies SDKCONFIG_DEFAULTS only when it creates the
+    file. Without hashing them, editing a target's sdkconfig is a silent no-op.
+    """
+    defaults = hashlib.sha256()
+    for path in sdkconfig_defaults_for(app, target).split(";"):
+        if path:
+            with open(path, "rb") as f:
+                defaults.update(f.read())
+    return f"{target} {defaults.hexdigest()[:16]}"
+
+
 def _stamp_target(app, target):
     """Remember which retro-go target this app's sdkconfig was generated for."""
     try:
         with open(os.path.join(os.getcwd(), app, "sdkconfig.rgtarget"), "w") as f:
-            f.write(target + ("+overlay" if os.path.exists(f"components/retro-go/targets/{target}/sdkconfig.{app}") else ""))
+            f.write(_target_stamp(app, target))
     except OSError:
         pass
 
@@ -305,14 +320,21 @@ for app in apps:
         # had been working minutes earlier. Stamp the retro-go target name in as well.
         # The retro-go target that produced it, recorded beside it because a generated
         # sdkconfig has nowhere to keep the fact itself.
+        #
+        # The stamp carries the target's sdkconfig contents as well, because esp-idf seeds a
+        # generated sdkconfig from SDKCONFIG_DEFAULTS *once* and never revisits it. Editing
+        # a target's sdkconfig therefore changed nothing at all until the generated one was
+        # deleted by hand -- four builds in a row reported the identical link failure while
+        # the option meant to fix it was never applied. Now the edit itself invalidates it.
         stamp_file = sdkconfig_file + ".rgtarget"
+        want_stamp = _target_stamp(app, args.target)
         stamped = ""
         if os.path.exists(stamp_file):
             with open(stamp_file, "r") as f:
                 stamped = f.read().strip()
         with open(sdkconfig_file, "r") as f:
             content = f.read()
-            if f"CONFIG_IDF_TARGET=\"{IDF_TARGET}\"" not in content or stamped != args.target:
+            if f"CONFIG_IDF_TARGET=\"{IDF_TARGET}\"" not in content or stamped != want_stamp:
                 print(f"Removing old sdkconfig for app '{app}' to force target reset...")
                 os.remove(sdkconfig_file)
                 # Also remove build directory
