@@ -55,28 +55,45 @@ static bool core1_task_rendering = false;
 // Measured 2026-08-02, same ROM, same flash, only this line different:
 //   core1_task_sound = true  (the old default): 5-7 fps,   BUSY 100%
 //   core1_task_sound = false                  : 56-59 fps, BUSY 72-74%
-// A ~10x difference from one flag. Root cause: gwenesis's core1_task and
-// retro-go's own display task (rg_display.c's "rg_display", started by
-// every app, not just this one) are both created at RG_TASK_PRIORITY_6
-// pinned to core 1 (rg_display.c:1002). They are equal priority, so
-// FreeRTOS only time-slices between them at a tick boundary
-// (configUSE_TIME_SLICING=1, CONFIG_FREERTOS_HZ=100 -> 10ms/tick) rather
-// than preempting immediately -- becoming ready doesn't mean becoming
-// scheduled. With core1_task_sound=true, main.c's scanline loop below
-// does a blocking rg_task_send() to core1_task on a depth-1 queue roughly
-// 262 times a frame; every one of those that lands while rg_display is
-// mid-blit (12ms+ for this system per BRINGUP.md's A13 table) has to wait
-// out that same 10ms tick window instead of being scheduled immediately,
-// and there are more than enough of those per frame to turn a 16.6ms
-// frame budget into 150-200ms. This is not gwenesis-specific: retro-core's
-// snes9x audio task is created the same way (main_snes.c:460, also
-// RG_TASK_PRIORITY_6 pinned to core 1), so it likely pays the same tax.
-// Defaulting to false until that framework-level priority collision is
-// addressed properly (components/retro-go, not here). The in-game "Sound
-// on core 1" option still flips this at runtime for testing -- it no
-// longer crashes in either position (see the ROM-header and 24-bit
-// address-mask fixes elsewhere in this tree from the same investigation),
-// it's just slow when on, and now you know why.
+// A ~10x difference from one flag, confirmed ten times back to back on
+// hardware. It is NOT a priority/scheduling accident -- lowering
+// rg_display's priority below core1_task's (removing any contention for
+// core 1) was tried and recovered essentially nothing, so that was ruled
+// out experimentally, not just in theory.
+//
+// The real mechanism, traced in FreeRTOS-Kernel-SMP/queue.c and tasks.c:
+// with core1_task_sound=true, the scanline loop below sends one message
+// to core1_task per scanline -- ~262 times a frame -- on a depth-1 queue.
+// Each message carries a few multiplies' worth of audio-index work
+// (gwenesis_SN76489_run/ym2612_run advance by ~3 samples a line). That is
+// far less work than a cross-core wake costs. A depth-1 queue only stays
+// a pipeline (fire-and-forget, sender never blocks) as long as the
+// consumer drains faster than the producer sends; once per-message work
+// is smaller than the round trip to wake the consumer, the producer
+// starts finding the queue still full on every send and genuinely blocks
+// (xQueueGenericSend's vTaskPlaceOnEventList path, not a busy-poll) until
+// the consumer catches up and wakes it back -- two cross-core interrupts
+// a line, every line, instead of one message dropped off in passing. The
+// "second core" stops parallelizing and becomes a lockstep rendezvous
+// partner that only adds latency. This is a structural property of
+// feeding a depth-1 queue faster than a cross-core wake can drain it, not
+// a bug in rg_task_send/receive or anything specific to this ROM.
+//
+// Not the same failure as retro-core's snes9x audio task (main_snes.c,
+// also RG_TASK_PRIORITY_6 pinned to core 1) -- checked before assuming a
+// resemblance: snes9x sends once per *frame* with a full frame's worth of
+// mixed audio already batched, not once per scanline, so a round trip
+// that would be ruinous 262 times a frame is amortized over an entire
+// frame of other work there and never forces this rendezvous.
+//
+// Given the amount of work this path is worth (a handful of multiplies)
+// can never amortize a cross-core round trip at this call frequency, the
+// fix is not tuning the queue -- it's not using it here. Defaulting to
+// false. The in-game "Sound on core 1" option still flips this at
+// runtime for testing -- it no longer crashes in either position (see
+// the ROM-header and 24-bit address-mask fixes elsewhere in this tree
+// from the same investigation), it's just ~10x slower when on, and now
+// you know why.
 static bool core1_task_sound = false;
 #endif
 

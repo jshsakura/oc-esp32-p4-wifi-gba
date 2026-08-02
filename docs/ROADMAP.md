@@ -14,7 +14,7 @@ ESP32-P4 기반 `oc-gba` 보드에서 어디까지 갈 수 있는지, 그리고 
 | 자원 | 값 | 에뮬레이션에서의 의미 |
 |---|---|---|
 | CPU | RISC-V 2코어 @360MHz (`CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=360`) | **PSP(333MHz MIPS)와 같은 체급.** gpSP가 원래 겨냥한 하드웨어 |
-| ISA | `rv32imafc_zicsr_zifencei_xesppie`, ABI `ilp32f` | RV32이고 `a`(원자)·`d`(배정밀도) 확장 없음 |
+| ISA | `rv32imafc_zicsr_zifencei_xesppie`, ABI `ilp32f` | RV32, `d`(배정밀도) 확장 없음. `a`(원자)는 `-march`엔 안 적혀 있지만 실제로는 있다 — 부록 A.3 정정 참조 |
 | 내부 SRAM | **768KB**, L2 캐시 128KB / 라인 64B | **최대 제약.** 3절의 예산 문제 참조 |
 | PSRAM | hex(x16) @200MHz, 패키지 내장 | 대역폭은 S3의 4~5배. **내장이라 증설 불가** |
 | 표시 | MIPI-DSI (ST7701), PPA / 2D-DMA | 현재는 CPU가 회전·바이트스왑 담당 |
@@ -347,8 +347,14 @@ STACK:.., HEAP:.., BUSY:87%, FPS:60 (0+12+48), BATT:..
 -march=rv32imafc_zicsr_zifencei_xesppie -mabi=ilp32f
 ```
 
-1. **`a` 확장 없음** — 원자 명령(LR/SC) 부재
-2. **`d` 확장 없음** (`ilp32f`) — 배정밀도 하드웨어 없음
+1. ~~**`a` 확장 없음** — 원자 명령(LR/SC) 부재~~ **정정 (2026-08-02): 틀렸다.** `-march` 문자열엔 `a`가 없지만
+   `riscv32-esp-elf-gcc -march=rv32imafc_zicsr_zifencei_xesppie -E -dM -`로 확인하면 `__riscv_atomic 1`이
+   찍히고, `lr.w`/`sc.w`를 직접 어셈블해도 `riscv32-esp-elf-as`가 정상적인 opcode로 받아준다(실제로
+   `components/esp_hw_support/include/spinlock.h`의 `esp_cpu_compare_and_set` → `rv_utils_compare_and_set`가
+   `__riscv_atomic` 분기를 타면서 이 명령을 쓴다 — 크로스코어 스핀락이 실제 하드웨어 CAS를 쓰고 있다는 뜻).
+   즉 실리콘은 `A` 확장을 갖고 있고, 툴체인의 `-march` 표기가 그걸 누락했을 뿐이다. 다이나렉 코드생성 시
+   `a` 명령을 배제할 근거로 이 줄을 인용하지 말 것 — LR/SC는 쓸 수 있다.
+2. **`d` 확장 없음** (`ilp32f`) — 배정밀도 하드웨어 없음. 이건 재확인됨, 그대로 유효.
 3. **`xesppie`** — Espressif 벤더 SIMD. 다이나렉과 무관하나 Phase 1 블릿 최적화 후보
 
 ### A.4 출처
