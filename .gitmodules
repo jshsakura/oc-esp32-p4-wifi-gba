@@ -6,3 +6,9 @@
 	path = external/fake-08
 	url = https://github.com/jshsakura/fake-08.git
 	branch = esp32p4-retro-go
+[submodule "external/o2em-go"]
+	path = external/o2em-go
+	url = https://github.com/jshsakura/o2em-go.git
+[submodule "external/fceumm-go"]
+	path = external/fceumm-go
+	url = https://github.com/sylverb/fceumm-go.git
