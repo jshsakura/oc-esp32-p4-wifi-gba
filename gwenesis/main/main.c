@@ -367,15 +367,27 @@ void app_main(void)
     sn76489_enabled = rg_settings_get_number(NS_APP, SETTING_SN76489_EMULATION, 1);
     z80_enabled = rg_settings_get_number(NS_APP, SETTING_Z80_EMULATION, 1);
 
+    /* Two buffers, not one.
+     *
+     * rg_display_submit() hands the surface to the display task, which reads it in place
+     * and asynchronously, and the task queue is one deep with a blocking send
+     * (rg_system.c: xQueueCreate(1) / xQueueSend(portMAX_DELAY)). With one buffer the VDP
+     * draws into the frame that is still being blitted, and the next submit stalls until
+     * that blit finishes -- so the blit cannot overlap emulation at all. Measured on the
+     * GBA core, where the same single buffer was in place: the display went from a
+     * measurable share of the frame to 0.1% once there were two.
+     *
+     * Mega Drive is the widest source here (320x224 at 8bpp needs the paletted expand
+     * pass), so it has the most to gain from the overlap. */
     updates[0] = rg_surface_create(320, 241, RG_PIXEL_PAL565_BE, MEM_FAST);
-    // updates[1] = rg_surface_create(320, 241, RG_PIXEL_PAL565_BE, MEM_FAST);
+    updates[1] = rg_surface_create(320, 241, RG_PIXEL_PAL565_BE, MEM_FAST);
     currentUpdate = updates[0];
 
     // This is a hack because our new surface format doesn't yet support overdraw space easily
     updates[0]->data += 160;
     updates[0]->height = 240;
-    // updates[1]->data += 160;
-    // updates[1]->height = 240;
+    updates[1]->data += 160;
+    updates[1]->height = 240;
 
     VRAM = rg_alloc(VRAM_MAX_SIZE, MEM_FAST);
 
@@ -581,6 +593,10 @@ void app_main(void)
             currentUpdate->width = screen_width;
             currentUpdate->height = screen_height;
             rg_display_submit(currentUpdate, 0);
+            /* Swap: the one just handed over is being read by the display task now. The
+             * VDP is pointed at the new buffer at the top of the next frame, where
+             * gwenesis_vdp_set_buffer() already runs. */
+            currentUpdate = (currentUpdate == updates[0]) ? updates[1] : updates[0];
         }
 
         rg_system_tick(rg_system_timer() - startTime);

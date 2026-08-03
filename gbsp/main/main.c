@@ -17,12 +17,31 @@
 #include "bios.h"
 
 /* JIT configuration */
-static bool jit_enabled = true;  /* Enable JIT, but all instructions use interpreter */
+/* The JIT is off, and that is the single largest performance fact about this core.
+ *
+ * It translates nothing -- the comment it shipped with said so outright, "Enable JIT, but
+ * all instructions use interpreter" -- yet it still ran its whole attempt every frame:
+ * look the block up, try to compile it, mark the pc failed, fall back. Measured on device
+ * against Zelda (A/B, same build, same ROM):
+ *
+ *     JIT on   19,616 us/frame, BUSY 95.6%
+ *     JIT off  12,342 us/frame, BUSY 61.9%
+ *
+ * 53% of wall clock, against the interpreter's own 47% -- the scaffolding cost more than
+ * the work. Turning it off is what brought the frame inside the 16.7ms budget.
+ *
+ * Left in place rather than deleted: jit_dev is someone's work in progress, and when it
+ * translates something this flag is how it comes back. Do not flip it without re-running
+ * the A/B. */
+static bool jit_enabled = false;
 static bool jit_initialized = false;
 static int jit_debug_counter = 0;
 #define JIT_DEBUG_INTERVAL 60
 
 u32 idle_loop_target_pc = 0xFFFFFFFF;
+/* 0 = ALWAYS (the classic gba_over.h entries); 1 = WHEN_NE, for raster polls
+ * whose callers burst through them — see IDLE_COND_* in main.h. */
+u32 idle_loop_cond = IDLE_COND_ALWAYS;
 u32 translation_gate_target_pc[MAX_TRANSLATION_GATES];
 u32 translation_gate_targets = 0;
 boot_mode selected_boot_mode = boot_game;
@@ -31,6 +50,13 @@ u32 skip_next_frame = 0;
 int sprite_limit = 1;
 
 gbsp_memory_t *gbsp_memory;
+gbsp_fastmem_t *gbsp_fastmem;
+
+/* Where the frame actually goes. Reported once a second next to the paging count, as a
+ * share of wall clock, so the three add up against 100% and a missing chunk is visible
+ * rather than inferred. */
+static int64_t prof_exec = 0, prof_disp = 0, prof_snd = 0, prof_pre = 0, prof_gap = 0;
+static int64_t prof_loop_end = 0, prof_jit = 0;
 
 static rg_surface_t *updates[2];
 static rg_surface_t *currentUpdate;
@@ -217,15 +243,37 @@ void app_main(void)
     // app = rg_system_init(AUDIO_SAMPLE_RATE * 0.7, &handlers, NULL);
     // rg_system_set_overclock(2);
 
+    /* Two frame buffers, not one.
+     *
+     * rg_display_submit() hands the surface to the display task and reads it there, in
+     * place and asynchronously -- and the task queue is one deep with a blocking send
+     * (rg_system.c: xQueueCreate(1) and xQueueSend(portMAX_DELAY)). With a single buffer
+     * that costs twice: the emulator overwrites a frame while it is still being blitted,
+     * and it stalls on the next submit until the blit finishes, so ~6ms of blit per frame
+     * cannot overlap emulation at all. With two, the depth-1 queue lets the emulator run
+     * exactly one frame ahead, which is what the queue depth was chosen for.
+     *
+     * updates[1] cannot be MEM_FAST: internal SRAM has ~66KB left once the guest's hot
+     * memory is in it, and a surface is 77KB. MEM_ANY puts it in PSRAM, which makes the
+     * two buffers unequal -- worth knowing when reading frame times, and worth revisiting
+     * if internal RAM is ever freed elsewhere. */
     updates[0] = rg_surface_create(GBA_SCREEN_WIDTH, GBA_SCREEN_HEIGHT + 1, RG_PIXEL_565_LE, MEM_FAST);
     updates[0]->height = GBA_SCREEN_HEIGHT;
-    // updates[1] = rg_surface_create(GBA_SCREEN_WIDTH, GBA_SCREEN_HEIGHT + 1, RG_PIXEL_565_LE, MEM_FAST);
-    // updates[1]->height = GBA_SCREEN_HEIGHT;
+    updates[1] = rg_surface_create(GBA_SCREEN_WIDTH, GBA_SCREEN_HEIGHT + 1, RG_PIXEL_565_LE, MEM_ANY);
+    updates[1]->height = GBA_SCREEN_HEIGHT;
     currentUpdate = updates[0];
 
     gba_screen_pixels = currentUpdate->data;
 
     gbsp_memory = rg_alloc(sizeof(*gbsp_memory), MEM_ANY);
+    /* The hot 112 KB into internal SRAM -- see gba_memory.h for why these three and not
+     * the others. MEM_FAST is a requirement here, not a preference: if this falls back to
+     * PSRAM the emulator still runs and simply loses the speed, silently, so the log line
+     * below is the only thing that would say so. */
+    gbsp_fastmem = rg_alloc(sizeof(*gbsp_fastmem), MEM_FAST);
+    RG_LOGI("gbsp memory: bulk %p (%u KB), fast %p (%u KB)", gbsp_memory,
+            (unsigned)(sizeof(*gbsp_memory) / 1024), gbsp_fastmem,
+            (unsigned)(sizeof(*gbsp_fastmem) / 1024));
 
     libretro_supports_bitmasks = true;
     retro_set_input_state(input_cb);
@@ -241,6 +289,42 @@ void app_main(void)
         // load_gamepak checks the header/size before returning, so this is a checked "bad ROM"
         // rejection, not a crash: tell the user and go back to the launcher instead of panicking.
         rg_system_rom_load_failed(_("Could not load the game file."));
+    }
+
+    /* The OTHER kind of wait: a raster poll — `ldrh rN,[VCOUNT]; cmp; bne` —
+     * that the classic always-burn skip must not touch, because these games'
+     * delay code CALLS the poll in a counted burst and on hardware ~120 calls
+     * fit inside the matching scanline; burn every arrival and a six-frame
+     * intro becomes seven hundred (proven: Super Robot Taisen D froze). So the
+     * target is the poll's closing branch and the slice burns only while the
+     * branch will loop (IDLE_COND_WHEN_NE; the check costs nothing off-match).
+     *
+     * Hand-curated, one entry per game proven on the host A/B rig: screens 99.8%
+     * identical at a two-frame shift, interpreted instructions -15..-17%.
+     * Only for carts gba_over.h gave no idle loop for — the two waits would
+     * otherwise fight over one target slot. */
+    if (idle_loop_target_pc == 0xFFFFFFFF)
+    {
+        static const struct { char code[5]; u32 branch_pc; } vcount_polls[] = {
+            { "A6SJ", 0x8932178 },   /* Super Robot Taisen D  (-15.2%) */
+            { "ATIJ", 0x858f088 },   /* Tennis no Ouji-sama Genius Boys Academy (-16.8%) */
+        };
+        /* The four-character game code, read off the cart the way load_gamepak
+         * does. gba_memory.h declares a `gamepak_code` but nothing defines it —
+         * using it would be a link error, not a lookup. */
+        const u8 *hdr = memory_map_read[0x08000000 >> 15];
+        if (!hdr)
+            hdr = load_gamepak_page(0);
+        for (size_t i = 0; hdr && i < sizeof(vcount_polls) / sizeof(vcount_polls[0]); i++)
+        {
+            if (memcmp(vcount_polls[i].code, hdr + 0xAC, 4) == 0)
+            {
+                idle_loop_target_pc = vcount_polls[i].branch_pc;
+                idle_loop_cond = IDLE_COND_WHEN_NE;
+                RG_LOGI("vcount poll at 0x%08lX (cond NE)", (unsigned long)idle_loop_target_pc);
+                break;
+            }
+        }
     }
 
     reset_gba();
@@ -271,11 +355,17 @@ void app_main(void)
         }
 
         int64_t start_time = rg_system_timer();
+        /* Wall clock spent above start_time -- the gamepad read and the menu check, which
+         * rg_system_tick never sees, so BUSY% cannot report them. Closed at the bottom of
+         * the loop. */
+        if (prof_loop_end)
+            prof_gap += start_time - prof_loop_end;
 
         update_input();
         rumble_frame_reset();
 
         clear_gamepak_stickybits();
+        int64_t _pA = rg_system_timer();
         
         /* Try JIT execution first, fallback to interpreter */
         bool jit_executed = false;
@@ -402,21 +492,59 @@ void app_main(void)
             }
         }
         
+        int64_t _p0 = rg_system_timer();
         if (!jit_executed) {
             execute_arm(execute_cycles);
         }
+        int64_t _p1 = rg_system_timer();
         // RG_TIMER_LAP("execute_arm");
 
         if (!skip_next_frame)
         {
             gba_maybe_correct(currentUpdate);
             rg_display_submit(currentUpdate, 0);
+            /* Swap before the emulator draws again: the one we just handed over is being
+             * read by the display task right now. */
+            currentUpdate = (currentUpdate == updates[0]) ? updates[1] : updates[0];
+            gba_screen_pixels = currentUpdate->data;
         }
+        int64_t _p2 = rg_system_timer();
 
         size_t frames_count = sound_read_samples((s16 *)mixbuffer, AUDIO_BUFFER_LENGTH);
         // RG_TIMER_LAP("sound_read_samples");
 
+        int64_t _p3 = rg_system_timer();
+        prof_pre  += _pA - start_time;   /* update_input, rumble, stickybits */
+        prof_jit  += _p0 - _pA;          /* the JIT attempt that falls back every time */
+        prof_exec += _p1 - _p0;
+        prof_disp += _p2 - _p1;
+        prof_snd  += _p3 - _p2;
+
         rg_system_tick(rg_system_timer() - start_time);
+        prof_loop_end = rg_system_timer();
+
+        /* Cart paging cost, once a second. The G&W runs its cart XIP and never pays this;
+         * here an 8MB cart against two 1MB buffers cannot be resident, so every miss is an
+         * fseek + 32KB fread from the SD card inside the frame loop. Print it next to the
+         * FPS line so the two can be read together. */
+        {
+            extern unsigned gamepak_page_loads, gamepak_page_us;
+            static int64_t next_pg_report = 0;
+            int64_t pg_now = rg_system_timer();
+            if (pg_now >= next_pg_report)
+            {
+#ifdef GBSP_PROFILE
+                if (next_pg_report)
+                    RG_LOGW("PROF/s: pre %.1f%%  jit %.1f%%  exec %.1f%%  display %.1f%%  sound %.1f%%  gap %.1f%%  paging %.1f%%",
+                            prof_pre / 10000.f, prof_jit / 10000.f, prof_exec / 10000.f, prof_disp / 10000.f,
+                            prof_snd / 10000.f, prof_gap / 10000.f, gamepak_page_us / 10000.f);
+#endif
+                gamepak_page_loads = 0;
+                gamepak_page_us = 0;
+                prof_exec = prof_disp = prof_snd = prof_pre = prof_gap = prof_jit = 0;
+                next_pg_report = pg_now + 1000000;
+            }
+        }
 
         rg_audio_submit(mixbuffer, frames_count);
         // RG_TIMER_LAP("rg_audio_submit");

@@ -21,6 +21,12 @@
 #include <rg_system.h>
 #include <ctype.h>
 
+#ifdef GBA_M4A_HLE
+/* See cpu.cpp for why these are declared and not included. */
+void m4a_hle_reset(void);
+void m4a_hle_scan_frame(void);
+#endif
+
 GBA_CACHE_ALIGN timer_type timer[4];
 
 GBA_CACHE_ALIGN u32 frame_counter = 0;
@@ -226,6 +232,14 @@ IRAM_ATTR u32 function_cc update_gba(int remaining_cycles)
           // We completed a frame, tell the dynarec to exit to the main thread
           frame_complete = 0x80000000;
           frame_counter++;
+
+#ifdef GBA_M4A_HLE
+          /* Games copy their sound mixer into IWRAM during sound init, which has
+           * not happened on frame 0 — so look once a frame until it is there, and
+           * then stop looking. A memcmp over 32 KB, a handful of times, next to a
+           * whole emulated frame: free. */
+          m4a_hle_scan_frame();
+#endif
         }
 
         // Vcount trigger (flag) and IRQ if enabled
@@ -296,6 +310,11 @@ void reset_gba(void)
   init_main();
   init_cpu();
   reset_sound();
+#ifdef GBA_M4A_HLE
+  /* IWRAM is about to be rewritten from scratch, so the address we were hooking
+   * means nothing now. Forget it and look again. */
+  m4a_hle_reset();
+#endif
 }
 
 bool main_check_savestate(const u8 *src)

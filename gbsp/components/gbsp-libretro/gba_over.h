@@ -1202,6 +1202,84 @@ static const ini_t gbaover[] = {
       0,                           /* translation_gate_target_2 */
       0,                           /* translation_gate_target_3 */
    },
+   /* The Korean fan translations, which this table would otherwise miss.
+    *
+    * They stamp the region byte of the game code 'K' — BPEK, AXVK, AXPK — and
+    * leave the engine byte-for-byte where it was. The lookup is keyed on the
+    * whole four-character code, so it misses, and the game silently loses its
+    * idle-loop skip, its 128 KB flash save and its RTC. On a desktop that is a
+    * performance footnote; on a handheld it is the difference between full speed
+    * and half.
+    *
+    * Each entry is its original-region twin's row, unchanged but for the code:
+    * same engine, same overrides. The idle loop is still exactly where the table
+    * already says it is — Emerald's at 0x080008ce, the same backward branch as
+    * BPEE.
+    *
+    * The titles below are the originals' and are NOT part of the match — the
+    * lookup is keyed on the code alone (gba_memory.c: load_game_config_over),
+    * because a patch is free to rewrite the header title and we cannot know
+    * which one it chose. They are here to say what each row is.
+    *
+    * FireRed/LeafGreen are included for the patches that do rewrite the region
+    * byte. The ones in the wild keep BPRE/BPGE — those never needed a row here,
+    * they needed the title to stop being part of the key, which is the other
+    * half of this fix. */
+   {
+      // Pokemon Emerald (Korean fan translation)
+      "POKEMON EMER",              /* gamepak_title (unused in the match) */
+      "BPEK",                      /* gamepak_code         */
+      "01",                        /* gamepak_maker        */
+      FLAGS_FLASH_128KB | FLAGS_RTC | FLAGS_RFU,  /* flags */
+      0x80008ce,                   /* idle_loop_target_pc  */
+      0,                           /* translation_gate_target_1 */
+      0,                           /* translation_gate_target_2 */
+      0,                           /* translation_gate_target_3 */
+   },
+   {
+      // Pokemon Ruby (Korean fan translation)
+      "POKEMON RUBY",              /* gamepak_title (unused in the match) */
+      "AXVK",                      /* gamepak_code         */
+      "01",                        /* gamepak_maker        */
+      FLAGS_FLASH_128KB | FLAGS_RTC,  /* flags             */
+      0,                           /* idle_loop_target_pc  */
+      0,                           /* translation_gate_target_1 */
+      0,                           /* translation_gate_target_2 */
+      0,                           /* translation_gate_target_3 */
+   },
+   {
+      // Pokemon Sapphire (Korean fan translation)
+      "POKEMON SAPP",              /* gamepak_title (unused in the match) */
+      "AXPK",                      /* gamepak_code         */
+      "01",                        /* gamepak_maker        */
+      FLAGS_FLASH_128KB | FLAGS_RTC,  /* flags             */
+      0,                           /* idle_loop_target_pc  */
+      0,                           /* translation_gate_target_1 */
+      0,                           /* translation_gate_target_2 */
+      0,                           /* translation_gate_target_3 */
+   },
+   {
+      // Pokemon: Fire Red (Korean fan translation)
+      "POKEMON FIRE",              /* gamepak_title (unused in the match) */
+      "BPRK",                      /* gamepak_code         */
+      "01",                        /* gamepak_maker        */
+      FLAGS_FLASH_128KB | FLAGS_RFU,  /* flags             */
+      0x80008b2,                   /* idle_loop_target_pc  */
+      0,                           /* translation_gate_target_1 */
+      0,                           /* translation_gate_target_2 */
+      0,                           /* translation_gate_target_3 */
+   },
+   {
+      // Pokemon: Leaf Green (Korean fan translation)
+      "POKEMON LEAF",              /* gamepak_title (unused in the match) */
+      "BPGK",                      /* gamepak_code         */
+      "01",                        /* gamepak_maker        */
+      FLAGS_FLASH_128KB | FLAGS_RFU,  /* flags             */
+      0x80008b2,                   /* idle_loop_target_pc  */
+      0,                           /* translation_gate_target_1 */
+      0,                           /* translation_gate_target_2 */
+      0,                           /* translation_gate_target_3 */
+   },
    {
       // Pokemon Emerald (J)
       "POKEMON EMER",              /* gamepak_title        */

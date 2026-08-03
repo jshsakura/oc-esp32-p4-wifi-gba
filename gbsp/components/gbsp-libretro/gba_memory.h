@@ -311,22 +311,51 @@ bool memory_check_savestate(const u8*src);
 bool memory_read_savestate(const u8*src);
 unsigned memory_write_savestate(u8 *dst);
 
+/* The guest's memory, split by how hot it is rather than kept in one block.
+ *
+ * All 848 KB of it used to be one rg_alloc(MEM_ANY), and MEM_ANY asks for nothing in
+ * particular -- so it landed in PSRAM, all of it, because it could not fit anywhere
+ * else. The interpreter touches this memory on essentially every guest instruction, so
+ * the whole emulator was running against 80 MHz external RAM.
+ *
+ * Internal SRAM is 768 KB total and the app leaves ~178 KB of it free, which is not
+ * enough for the guest's memory but is enough for the part of it that is read hardest:
+ *
+ *   memory_map_read  32 KB   consulted on every guest load, store and PC region change
+ *   iwram            64 KB   the guest's fast RAM -- its hot code, its stack, and the
+ *                            M4A mixer's working buffers all live here by design
+ *   bios_rom         16 KB   every BIOS call
+ *                   ------
+ *                   112 KB
+ *
+ * VRAM (96 KB) is the next candidate and does not fit alongside these; EWRAM (512 KB)
+ * and the save (128 KB) cannot fit at all and do not want to -- EWRAM is large and read
+ * comparatively evenly, which is the profile external RAM handles worst-per-byte but
+ * best-per-total.
+ *
+ * Split as two allocations rather than one struct with an attribute because the caps
+ * belong to the allocation, not to the type. */
 typedef struct
 {
   u8 vram[1024 * 96];
-  u8 bios_rom[1024 * 16];
   u8 ewram[1024 * 256 * 2];
-  u8 iwram[1024 * 32 * 2];
-  u8 *memory_map_read[8 * 1024];
   u8 gamepak_backup[1024 * 128];
 } gbsp_memory_t;
 
+typedef struct
+{
+  u8 bios_rom[1024 * 16];
+  u8 iwram[1024 * 32 * 2];
+  u8 *memory_map_read[8 * 1024];
+} gbsp_fastmem_t;
+
 extern gbsp_memory_t *gbsp_memory;
+extern gbsp_fastmem_t *gbsp_fastmem;
 #define vram gbsp_memory->vram
-#define bios_rom gbsp_memory->bios_rom
 #define ewram gbsp_memory->ewram
-#define iwram gbsp_memory->iwram
-#define memory_map_read gbsp_memory->memory_map_read
 #define gamepak_backup gbsp_memory->gamepak_backup
+#define bios_rom gbsp_fastmem->bios_rom
+#define iwram gbsp_fastmem->iwram
+#define memory_map_read gbsp_fastmem->memory_map_read
 
 #endif

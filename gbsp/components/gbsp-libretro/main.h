@@ -94,6 +94,22 @@ bool main_read_savestate(const u8 *src);
 #define MAX_TRANSLATION_GATES 3
 
 extern u32 idle_loop_target_pc;
+/* When to burn the slice at idle_loop_target_pc.
+ *
+ * ALWAYS is the classic table semantic: the pc is inside a loop that only an
+ * interrupt can release, so any arrival means waiting.
+ *
+ * WHEN_NE exists for the OTHER shape of wait — a raster poll,
+ * `ldrh rN,[VCOUNT]; cmp rN,#line; bne back` — whose callers routinely burst
+ * through it while the compare already matches (Super Robot Taisen D delays by
+ * CALLING the poll N times; on hardware ~120 of those calls fit inside the
+ * matching scanline). Park the target on the BRANCH and burn the slice only
+ * while Z says it will loop back; a pass-through costs its natural handful of
+ * cycles instead of a whole slice, which is the difference between an intro
+ * that takes six frames and one that takes seven hundred. */
+#define IDLE_COND_ALWAYS   0u
+#define IDLE_COND_WHEN_NE  1u
+extern u32 idle_loop_cond;
 extern u32 translation_gate_target_pc[MAX_TRANSLATION_GATES];
 extern u32 translation_gate_targets;
 

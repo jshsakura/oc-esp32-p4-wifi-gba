@@ -1483,6 +1483,22 @@ INLINE void chan_calc(FM_CH *CH, int num)
 {
   do
   {
+    /* Silent-channel skip (lossless): skip the whole compute block only when the
+     * channel is fully settled to silence — all four operators EG_OFF AND no
+     * residual op1_out feedback AND no pending 1-sample MEM delay. A looser
+     * "all EG_OFF" test dropped the last delayed MEM sample on note-off and
+     * changed the output — a running-game audio-hash A/B caught it where a
+     * silent test harness never could. Phase still advances (KEYON never resets
+     * it). out_fm[] is zeroed every sample, so a skipped channel reads as 0.
+     * Byte-identical output; ~5-15% off YM2612 on real audio. */
+    if (((CH->SLOT[SLOT1].state | CH->SLOT[SLOT2].state |
+          CH->SLOT[SLOT3].state | CH->SLOT[SLOT4].state) == EG_OFF)
+        && CH->mem_value == 0 && CH->op1_out[0] == 0 && CH->op1_out[1] == 0)
+    {
+      /* fully settled: op1_out stays 0,0 and mem_value stays 0 — nothing to do */
+    }
+    else
+    {
     UINT32 AM = ym2612.OPN.LFO_AM >> CH->ams;
     unsigned int eg_out = volume_calc(&CH->SLOT[SLOT1]);
 
@@ -1526,6 +1542,7 @@ INLINE void chan_calc(FM_CH *CH, int num)
 
     /* store current MEM */
     CH->mem_value = mem;
+    }
 
     /* update phase counters AFTER output calculations */
     if(CH->pms)

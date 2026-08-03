@@ -18,6 +18,7 @@
  */
 
 #include "common.h"
+#include <esp_timer.h>
 
 /* Sound */
 #define gbc_sound_tone_control_low(channel, regn)                             \
@@ -1575,8 +1576,27 @@ static void load_game_config_over(gamepak_info_t *gpinfo)
      if (strcmp(gbaover[i].gamepak_code, gpinfo->gamepak_code))
         continue;
 
-     if (strcmp(gbaover[i].gamepak_title, gpinfo->gamepak_title))
-        continue;
+     /* The code is the whole key. The title is documentation.
+      *
+      * This used to also require the header title to match, and that compare
+      * did no work: every one of the 203 codes in gbaover[] is unique, so no
+      * two rows could ever be told apart by their titles. What it did instead
+      * was give each row a way to silently never fire — because a fan
+      * translation or a ROM hack is free to rewrite that title, and then the
+      * game quietly loses its idle-loop skip, its 128 KB flash save and its
+      * RTC. The Korean Pokemon patches are exactly this case: the ones that
+      * stamp their own region byte are caught by the K rows below, but the
+      * FireRed/LeafGreen patches in the wild keep BPRE/BPGE and come through
+      * the ORIGINAL rows, where a renamed title was the difference between
+      * full speed and half.
+      *
+      * Identifying a cart by its code is also the right answer on the merits:
+      * a hack built on FireRed IS FireRed's engine and wants FireRed's
+      * overrides. Matching a title would be asking whether someone renamed it.
+      *
+      * (The sibling trap, from the SNES side of the ledger: never gate on a
+      * whole-ROM hash either. Patches, hacks and revisions all change it, and
+      * every one of them loses the feature.) */
 
      printf("gamepak title: %s\n", gbaover[i].gamepak_title);
      printf("gamepak code : %s\n", gbaover[i].gamepak_code);
@@ -2183,8 +2203,19 @@ static u32 evict_gamepak_page(void)
   return ret;
 }
 
+/* How often the cart has to be fetched from the SD card, and how long it takes.
+ *
+ * The Game & Watch runs its cart execute-in-place from memory-mapped flash, so a page
+ * is never "missing" there and this cost does not exist. Here the ROM is paged into two
+ * 1MB buffers, so an 8MB cart cannot be resident and every miss is an fseek plus a 32KB
+ * fread from the card -- inside the frame loop. Whether that matters is a number, not an
+ * opinion, so count it. Read and cleared by the front-end once a second. */
+unsigned gamepak_page_loads = 0;
+unsigned gamepak_page_us = 0;
+
 u8 *load_gamepak_page(u32 physical_index)
 {
+  int64_t _pg_start = esp_timer_get_time();
   if(physical_index >= (gamepak_size >> 15))
     return &gamepak_buffers[0][0];
 
@@ -2206,6 +2237,8 @@ u8 *load_gamepak_page(u32 physical_index)
   if (physical_index == 0)
     update_gpio_romregs();
 
+  gamepak_page_loads++;
+  gamepak_page_us += (unsigned)(esp_timer_get_time() - _pg_start);
   return swap_location;
 }
 
@@ -2555,6 +2588,7 @@ u32 load_gamepak(const char *path, const char *name,
    memcpy(gpinfo.gamepak_maker, &gamepak_buffers[0][0xB0],  2);
 
    idle_loop_target_pc = 0xFFFFFFFF;
+   idle_loop_cond = IDLE_COND_ALWAYS;
    translation_gate_targets = 0;
    flash_device_id = FLASH_DEVICE_MACRONIX_64KB;
    flash_bank_cnt = FLASH_SIZE_64KB;

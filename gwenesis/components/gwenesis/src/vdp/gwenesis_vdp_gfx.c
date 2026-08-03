@@ -570,6 +570,24 @@ void draw_line_b(int line)
 
   unsigned int numcell = 0;
   scr -= patx;
+
+  /* Fast path: without per-column vscroll, *vsram is constant across the line,
+   * so scrolly/row/paty/nt are loop-invariant. The compiler can't hoist them
+   * (vsram is a pointer read it must assume may alias), so do it by hand — saves
+   * ~one div/mask/mul set per 8-pixel column, ~40x/line. Pixel-identical. */
+  if (!column_scrolling) {
+    uint16_t scrolly = *vsram + line;
+    uint8_t row = (scrolly >> 3) & nth_mask;
+    uint8_t paty = scrolly & 7;
+    unsigned int nt = ntaddr + row * ntwidth_x2;
+    while (scr < end) {
+      draw_pattern_planeB(scr, FETCH16VRAM(nt + col * 2), paty);
+      col = (col + 1) & ntw_mask;
+      scr += 8;
+    }
+    return;
+  }
+
   while (scr < end) {
     // Calculate vertical scrolling for the current line
     uint16_t scrolly = *vsram + line;
@@ -585,7 +603,7 @@ void draw_line_b(int line)
     numcell++;
 
     // If per-column scrolling is active, increment VSRAM pointer
-    if (column_scrolling && (numcell & 1) == 0)
+    if ((numcell & 1) == 0)
       vsram += 2;
     }
 }
@@ -645,6 +663,21 @@ void draw_line_aw(int line) {
 
   unsigned int numcell = 0;
   pos -= patx;
+
+  /* Fast path: no per-column vscroll -> scrolly/row/paty/nt loop-invariant
+   * (see draw_line_b). NOTE: must fall through to the Window draw below, so this
+   * is if/else, not an early return. Pixel-identical. */
+  if (!column_scrolling) {
+    uint16_t scrolly = *vsram + line;
+    uint8_t row = (scrolly >> 3) & nth_mask;
+    uint8_t paty = scrolly & 7;
+    unsigned int nt = ntaddr + row * ntwidth_x2;
+    while (pos < end) {
+      draw_pattern_planeA(pos, FETCH16VRAM(nt + col * 2), paty);
+      col = (col + 1) & ntw_mask;
+      pos += 8;
+    }
+  } else
   while (pos < end) {
     // Calculate vertical scrolling for the current line
     uint16_t scrolly = *vsram + line;
@@ -661,7 +694,7 @@ void draw_line_aw(int line) {
     numcell++;
 
     // If per-column scrolling is active, increment VSRAM pointer
-    if (column_scrolling && (numcell & 1) == 0)
+    if ((numcell & 1) == 0)
       vsram += 2;
   }
 
