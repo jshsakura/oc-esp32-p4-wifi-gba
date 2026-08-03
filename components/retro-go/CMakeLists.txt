@@ -51,6 +51,22 @@ if(RG_ENABLE_PROFILING)
     component_compile_options(-DRG_ENABLE_PROFILING)
 endif()
 
+# Bench harness -- see the call site in rg_system.c. Both must be given; neither is set in
+# any build we ship. It belongs here, next to the code that reads it: this component does
+# not call rg_setup_compile_options(), so a definition added there never arrives, and the
+# result is a hook that compiles away to nothing without a word of complaint.
+if(RG_BENCH_PROFILE_APU)
+    component_compile_options(-DRG_BENCH_PROFILE_APU=1)
+endif()
+
+if(RG_BENCH_ROM_DIR AND RG_BENCH_ROM_MATCH)
+    component_compile_options(
+        -DRG_BENCH_ROM_DIR="${RG_BENCH_ROM_DIR}"
+        -DRG_BENCH_ROM_MATCH="${RG_BENCH_ROM_MATCH}"
+    )
+    message(STATUS "RG_BENCH: /sd/roms/${RG_BENCH_ROM_DIR} matching '${RG_BENCH_ROM_MATCH}'")
+endif()
+
 if(RG_PROJECT_VER)
     component_compile_options(-DRG_PROJECT_VER="${RG_PROJECT_VER}")
 endif()

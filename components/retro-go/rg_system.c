@@ -421,6 +421,19 @@ rg_app_t *rg_system_reinit(int sampleRate, const rg_handlers_t *handlers, void *
     return &app;
 }
 
+#if defined(RG_BENCH_ROM_DIR) && defined(RG_BENCH_ROM_MATCH)
+/* Logs every entry so one run also answers "what is actually on the card", then keeps the
+ * first basename containing the match string. See the call site in rg_system_init(). */
+static int bench_pick_rom(const rg_scandir_t *file, void *arg)
+{
+    char *out = (char *)arg;
+    RG_LOGW("BENCH: found '%s'", file->basename);
+    if (!out[0] && strstr(file->basename, RG_BENCH_ROM_MATCH))
+        snprintf(out, RG_PATH_MAX + 1, "%s", file->path);
+    return RG_SCANDIR_CONTINUE;
+}
+#endif
+
 rg_app_t *rg_system_init(int sampleRate, const rg_handlers_t *handlers, void *_unused)
 {
     RG_ASSERT(app.initialized == false, "rg_system_init() was already called.");
@@ -558,6 +571,49 @@ rg_app_t *rg_system_init(int sampleRate, const rg_handlers_t *handlers, void *_u
 
     app.indicatorsMask = rg_settings_get_number(NS_GLOBAL, SETTING_INDICATOR_MASK, app.indicatorsMask);
     app.romPath = app.bootArgs ?: ""; // For whatever reason some of our code isn't NULL-aware, sigh..
+
+#if defined(RG_BENCH_ROM_DIR) && defined(RG_BENCH_ROM_MATCH)
+    /* Bench harness: pick a ROM without the launcher.
+     *
+     * This board has no buttons and its SD card lives inside the case, so a ROM can be
+     * chosen neither by hand nor by editing boot.json. Worse, boot.json is not even stable
+     * -- rg_system_rom_load_failed() clears BootName/BootArgs on the way back to the
+     * launcher, so one bad launch erases which game the device was set to.
+     *
+     * So: scan /sd/roms/<RG_BENCH_ROM_DIR>, log every name found, and take the first
+     * basename containing RG_BENCH_ROM_MATCH. It sits here rather than in each core
+     * because this is the one line in the codebase that decides romPath, which means one
+     * copy covers every system.
+     *
+     * Both flags are required, and neither is set in any normal build. Matching on a
+     * substring rather than a full path is deliberate: the card holds Korean filenames
+     * that are painful to reproduce exactly and easy to get subtly wrong. */
+    {
+        static char bench_path[RG_PATH_MAX + 1];
+        bench_path[0] = 0;
+        RG_LOGW("BENCH: scanning %s/%s for '%s'", RG_BASE_PATH_ROMS, RG_BENCH_ROM_DIR, RG_BENCH_ROM_MATCH);
+        rg_storage_scandir(RG_BASE_PATH_ROMS "/" RG_BENCH_ROM_DIR, &bench_pick_rom, bench_path,
+                           RG_SCANDIR_FILES | RG_SCANDIR_SORT);
+        if (bench_path[0])
+        {
+            RG_LOGW("BENCH: using '%s'", bench_path);
+            app.romPath = bench_path;
+            app.bootArgs = bench_path;
+            /* retro-go's multi-system apps dispatch on configNs, not on the partition they
+             * run from: retro-core alone is eleven systems and picks between them by name
+             * (retro-core/main/main.c). That name normally arrives in boot.json, which the
+             * bench is here precisely because we cannot write -- so the ROM directory
+             * doubles as the system name. They are the same string by convention
+             * ("nes", "snes", "md", ...), which is what makes one flag enough. */
+            app.configNs = RG_BENCH_ROM_DIR;
+        }
+        else
+        {
+            RG_LOGE("BENCH: nothing in %s/%s matches '%s'", RG_BASE_PATH_ROMS, RG_BENCH_ROM_DIR,
+                    RG_BENCH_ROM_MATCH);
+        }
+    }
+#endif
 
     autoSaveInterval = (int64_t)rg_settings_get_number(NS_GLOBAL, SETTING_AUTOSAVE, 0) * 1000000;
 

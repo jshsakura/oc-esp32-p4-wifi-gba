@@ -115,8 +115,8 @@
 //     constant-current boost driver on the carrier board -- this GPIO only gates/dims it.
 //     Check first whether the module's J20 already supplies backlight power.
 #define RG_SCREEN_BACKLIGHT         1
-#define RG_GPIO_LCD_RST             GPIO_NUM_51
-#define RG_GPIO_LCD_BCKL            GPIO_NUM_52
+#define RG_GPIO_LCD_RST             GPIO_NUM_51  // net PANEL_RST
+#define RG_GPIO_LCD_BCKL            GPIO_NUM_52  // net BL_PWM
 
 // ---------------------------------------------------------------------------
 // Input -- twelve buttons across two TCA9554 expanders, so the wiring stays next to the
@@ -164,21 +164,44 @@
 }
 
 // ---------------------------------------------------------------------------
-// Battery -- the carrier board moved from a TP4056 to an IP5306 power module, which
-// reports charge state over I2C at 0x75 rather than through an ADC channel. PCF8591's
-// AIN0 (net VBAT_SENSE) is unconnected on the current board as a result.
-// ---------------------------------------------------------------------------
-#define RG_BATTERY_DRIVER           0   // TODO: IP5306 driver, see tasks
-#define RG_I2C_IP5306_ADDR          0x75
-
-// Volume wheel: the AGB potentiometer feeds an MCP3421, a single channel 18-bit converter
-// that replaced the four channel PCF8591 once the IP5306 took over battery reporting and
-// left only one analogue signal on the board.
+// Battery -- read as a voltage on the SoC's own ADC, through a 1:1 divider.
 //
-// The MCP3421's address is set at the factory by the part's suffix, not by strapping pins:
-// A0 is 0x68 and the variants run to 0x6F. Check the part actually fitted before trusting
-// this, because nothing on the board makes it visible.
-#define RG_I2C_MCP3421_ADDR         0x68
+// This replaces a plan, not a working driver. The board had moved to an IP5306 power
+// module on the understanding that it reports charge state over I2C at 0x75, and this
+// file carried the address for a driver that was never written. The I2C part turns out
+// not to be sold as a module at all -- only as a bare chip -- so the module actually
+// fitted (MH-CD42) is the non-I2C variant and there is no register to read. The plan
+// was unbuildable; measuring the cell is the only path that exists.
+//
+// RG_BATTERY_DRIVER 1 is already implemented (rg_input.c: adc_oneshot + adc_cali,
+// four samples averaged). It needs the board to bring the divider tap out on BAT_SENSE.
+//
+// The x2 in the macros IS the divider: two equal resistors. A 1S cell at 4.2V full
+// arrives at 2.1V, comfortably inside the ~3.1V full scale that ADC_ATTEN_DB_12 gives
+// (rg_input.c sets the attenuation, not this file). Put ~0.1uF on the tap: at 100k/100k
+// the source impedance is 50k and the sample-and-hold will not settle without it.
+// ---------------------------------------------------------------------------
+#define RG_BATTERY_DRIVER            1   // 1 = ADC
+#define RG_BATTERY_ADC_UNIT          ADC_UNIT_1
+#define RG_BATTERY_ADC_CHANNEL       ADC_CHANNEL_6
+#define RG_GPIO_BATTERY_SENSE        GPIO_NUM_22  // net BAT_SENSE
+#define RG_BATTERY_CALC_PERCENT(raw) (((raw) * 2.f - 3500.f) / (4200.f - 3500.f) * 100.f)
+#define RG_BATTERY_CALC_VOLTAGE(raw) ((raw) * 2.f * 0.001f)
+
+// Volume wheel -- the AGB potentiometer's wiper, straight into the SoC's ADC.
+//
+// It used to go through an MCP3421, an 18-bit I2C converter. That part is gone from the
+// board, and nothing was lost with it: no code ever read it. The address below was a
+// declaration waiting for a driver. Since the wheel needed a driver written either way,
+// writing it against the internal ADC costs one part and one I2C address less.
+//
+// Shares ADC_UNIT_1 with the battery sense above. ESP-IDF allows exactly one oneshot
+// handle per unit, so the two channels must be configured on one shared handle -- see
+// rg_input.c. Opening a second handle fails at init, and the failure is a log line, not
+// a crash, which is the kind that gets missed.
+#define RG_VOLUME_ADC_UNIT           ADC_UNIT_1
+#define RG_VOLUME_ADC_CHANNEL        ADC_CHANNEL_5
+#define RG_GPIO_VOLUME_WHEEL         GPIO_NUM_21  // net VOL_WIPER
 
 
 // ---------------------------------------------------------------------------
@@ -198,6 +221,30 @@
 
 // Status LED -- the GBA shell has a power LED but the board does not drive it from a GPIO.
 #define RG_GPIO_LED                 GPIO_NUM_NC
+
+// ---------------------------------------------------------------------------
+// Deliberately not used. Answering the board, once, in the file the board checks.
+//
+// These three are wired on the carrier board and claimed by nothing here, and that is a
+// decision rather than an omission -- so they are written down, because "firmware does
+// not claim it" reads identically whether it was decided or forgotten.
+//
+//   GPIO48  LED_STAT   No status LED. RG_GPIO_LED above is GPIO_NUM_NC.
+//   GPIO49  HP_EN      No headphone support. There is no HP_* concept anywhere in this
+//   GPIO50  HP_DET     firmware: one output path, ES8311 -> NS4150B, no jack detect
+//                      callback and no output switching. The module's amplifier is BTL
+//                      and cannot drive a jack directly, so supporting one means an
+//                      external I2S DAC plus routing plus detect handling -- none of
+//                      which is planned.
+//
+// Remove the jack and the LED from the board. Keep 48/49/50 broken out to the header if
+// it is free to do so, so that adding them later is a firmware change and not a respin.
+//
+// Same applies to the board's I2S_DIN/I2S_LRCK/I2S_BCK on GPIO27/32/33: this firmware's
+// I2S is the module-internal bus to the ES8311 (GPIO9-13 below, none of which reach a
+// pad). An external I2S on header pins is only useful for the headphone DAC that is not
+// happening, so those three are free.
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Failing gracefully

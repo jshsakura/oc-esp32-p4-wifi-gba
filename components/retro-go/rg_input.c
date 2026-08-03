@@ -10,9 +10,123 @@
 #include <esp_adc/adc_cali.h>
 #include <esp_adc/adc_cali_scheme.h>
 
+#if defined(RG_GAMEPAD_ADC_MAP) || RG_BATTERY_DRIVER == 1 || defined(RG_VOLUME_ADC_CHANNEL)
+#define RG_INPUT_USES_ADC 1
+
+/* One oneshot handle per ADC unit, shared by everything that reads that unit.
+ *
+ * ESP-IDF allows exactly one oneshot handle per unit: a second adc_oneshot_new_unit()
+ * on a unit already claimed returns ESP_ERR_NOT_FOUND. Each reader used to open its
+ * own, which was harmless only for as long as no board put two of them on the same
+ * unit. oc-gba does -- the volume wheel on ADC1_CH5 and the battery divider on
+ * ADC1_CH6 -- and the second reader would simply have logged a line and never read
+ * anything. That is the failure worth designing out: not a crash, just a value that
+ * is quietly always zero.
+ *
+ * Channels stay per-reader; only the unit is shared. */
+static adc_oneshot_unit_handle_t adc_units[2] = {NULL, NULL};
+
+static adc_oneshot_unit_handle_t adc_unit_acquire(adc_unit_t unit)
+{
+    if (unit != ADC_UNIT_1 && unit != ADC_UNIT_2)
+    {
+        RG_LOGE("Bad ADC unit %d", (int)unit);
+        return NULL;
+    }
+    if (adc_units[unit])
+        return adc_units[unit];
+
+    adc_oneshot_unit_init_cfg_t init_config = {.unit_id = unit};
+    esp_err_t err = adc_oneshot_new_unit(&init_config, &adc_units[unit]);
+    if (err != ESP_OK)
+    {
+        RG_LOGE("Failed to initialize ADC unit %d: %s", (int)unit + 1, esp_err_to_name(err));
+        adc_units[unit] = NULL;
+    }
+    return adc_units[unit];
+}
+#endif
+
 #if RG_BATTERY_DRIVER == 1
 static adc_oneshot_unit_handle_t adc_unit = NULL;
 static adc_cali_handle_t adc_cali = NULL;
+#endif
+
+#ifdef RG_VOLUME_ADC_CHANNEL
+static adc_oneshot_unit_handle_t volume_adc_unit = NULL;
+/* Last wheel position we acted on, in percent, or -1 before the first read. */
+static int volume_wheel_last = -1;
+
+/* Full-scale raw count at ADC_BITWIDTH_DEFAULT (12 bits on this part). */
+#ifndef RG_VOLUME_ADC_RAW_MAX
+#define RG_VOLUME_ADC_RAW_MAX 4095
+#endif
+
+/* How far the wheel must move before we act, in percent.
+ *
+ * One percent is ~41 raw counts, and a wiper fed through a high source impedance
+ * wanders by more than that on its own. Without a deadband the volume would be
+ * rewritten several times a second while nobody is touching it, and every write
+ * marks the settings dirty. */
+#ifndef RG_VOLUME_WHEEL_DEADBAND
+#define RG_VOLUME_WHEEL_DEADBAND 3
+#endif
+
+/* How often to look. The input task runs every 10ms, which is far more often than a
+ * thumbwheel can move and would spend four ADC conversions each time for nothing. */
+#ifndef RG_VOLUME_WHEEL_PERIOD_US
+#define RG_VOLUME_WHEEL_PERIOD_US (200 * 1000)
+#endif
+
+/* Read the wheel and, if it actually moved, apply it.
+ *
+ * rg_audio_set_volume() persists through rg_settings_set_number(), which only updates
+ * the in-memory tree and marks it dirty -- the card is written by rg_settings_commit()
+ * elsewhere. That matters: this runs while a game is running, and writing the SD inside
+ * a frame loop corrupts the FAT.
+ *
+ * Note the top of travel: the wiper's rail is 3V3 but ADC_ATTEN_DB_12 saturates around
+ * 3.1V, so the last few percent of rotation all read full scale. The wheel reaches 100%
+ * slightly before its stop, which is invisible in use and is the reason this maps raw
+ * counts rather than calibrated millivolts -- there is nothing above full scale to
+ * calibrate against. */
+static void volume_wheel_update(void)
+{
+    int sum = 0;
+
+    if (!volume_adc_unit)
+        return;
+
+    /* The input task is started by rg_input_init(), which runs ~100 lines of
+     * rg_system_init() BEFORE rg_audio_init(). So this function is live and polling
+     * while the audio driver is still a null pointer, and calling rg_audio_set_volume()
+     * in that window faults the board into a boot loop -- found exactly that way.
+     * app.initialized is set after every subsystem is up, which is the condition we
+     * actually mean. */
+    const rg_app_t *app = rg_system_get_app();
+    if (!app || !app->initialized)
+        return;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        int value = 0;
+        if (adc_oneshot_read(volume_adc_unit, RG_VOLUME_ADC_CHANNEL, &value) != ESP_OK)
+            return;
+        sum += value;
+    }
+
+    int raw = sum / 4;
+    int percent = (raw * 100 + RG_VOLUME_ADC_RAW_MAX / 2) / RG_VOLUME_ADC_RAW_MAX;
+    percent = RG_MIN(RG_MAX(percent, 0), 100);
+
+    /* First reading wins outright: the wheel is a physical position, so whatever it is
+     * pointing at when we boot is what the user set, and the stored volume is stale. */
+    if (volume_wheel_last < 0 || abs(percent - volume_wheel_last) >= RG_VOLUME_WHEEL_DEADBAND)
+    {
+        volume_wheel_last = percent;
+        rg_audio_set_volume(percent);
+    }
+}
 #endif
 
 #ifdef RG_GAMEPAD_ADC_MAP
@@ -34,6 +148,85 @@ static rg_keymap_serial_t keymap_serial[] = RG_GAMEPAD_SERIAL_MAP;
 #ifdef RG_GAMEPAD_VIRT_MAP
 static rg_keymap_virt_t keymap_virt[] = RG_GAMEPAD_VIRT_MAP;
 #endif
+#ifdef RG_INPUT_SERIAL_KEYS
+/* Keys typed down the console, for a board that has no buttons yet.
+ *
+ * The oc-gba carrier has no keys fitted during bring-up, which makes the launcher
+ * unreachable and every core a thing you can only look at. This turns the same cable
+ * the logs come out of into a gamepad: a character arriving on stdin presses its key,
+ * and the press is held for a fixed time and then released, because a terminal reports
+ * key-down and never key-up.
+ *
+ * Build-flag gated (-DRG_INPUT_SERIAL_KEYS) and off in any normal build. It is a
+ * bring-up rig, not a feature: anything typed into a serial monitor becomes input.
+ *
+ *   w a s d   d-pad          j  A     u  L     enter  START
+ *                            k  B     i  R     space  SELECT
+ *
+ * MENU and OPTION need no letters of their own -- they are chords in
+ * RG_GAMEPAD_VIRT_MAP, and this state is merged before that runs, so typing the
+ * chord's members within the hold window fires them exactly as the shell would.
+ */
+#include <fcntl.h>
+#include <unistd.h>
+
+#ifndef RG_INPUT_SERIAL_HOLD_US
+#define RG_INPUT_SERIAL_HOLD_US (150 * 1000)
+#endif
+
+static uint32_t serial_keys_state = 0;
+static int64_t serial_keys_expire = 0;
+static bool serial_keys_ready = false;
+
+static uint32_t serial_key_for(int c)
+{
+    switch (c)
+    {
+    case 'w': return RG_KEY_UP;
+    case 's': return RG_KEY_DOWN;
+    case 'a': return RG_KEY_LEFT;
+    case 'd': return RG_KEY_RIGHT;
+    case 'j': return RG_KEY_A;
+    case 'k': return RG_KEY_B;
+    case 'u': return RG_KEY_L;
+    case 'i': return RG_KEY_R;
+    case '\r': case '\n': return RG_KEY_START;
+    case ' ': return RG_KEY_SELECT;
+    default: return 0;
+    }
+}
+
+static uint32_t serial_keys_read(void)
+{
+    if (!serial_keys_ready)
+    {
+        int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+        if (flags != -1)
+            fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+        serial_keys_ready = true;
+    }
+
+    /* Drain whatever arrived. Several characters inside one hold window stack, which is
+     * what makes a chord typeable. */
+    char buf[16];
+    int n = read(STDIN_FILENO, buf, sizeof buf);
+    for (int i = 0; i < n; ++i)
+    {
+        uint32_t key = serial_key_for(buf[i]);
+        if (key)
+        {
+            serial_keys_state |= key;
+            serial_keys_expire = rg_system_timer() + RG_INPUT_SERIAL_HOLD_US;
+        }
+    }
+
+    if (serial_keys_state && rg_system_timer() >= serial_keys_expire)
+        serial_keys_state = 0;
+
+    return serial_keys_state;
+}
+#endif
+
 static volatile bool input_task_running = false;
 static volatile uint32_t gamepad_state = -1;
 static uint32_t gamepad_mapped = 0;
@@ -263,6 +456,10 @@ bool rg_input_read_gamepad_raw(uint32_t *out)
     }
 #endif
 
+#ifdef RG_INPUT_SERIAL_KEYS
+    state |= serial_keys_read();
+#endif
+
 #if defined(RG_GAMEPAD_VIRT_MAP)
     for (size_t i = 0; i < RG_COUNT(keymap_virt); ++i)
     {
@@ -282,6 +479,9 @@ static void input_task(void *arg)
     uint32_t local_gamepad_state = 0;
     uint32_t state;
     int64_t next_battery_update = 0;
+#ifdef RG_VOLUME_ADC_CHANNEL
+    int64_t next_volume_update = 0;
+#endif
 
     memset(debounce, 0xFF, sizeof(debounce));
     input_task_running = true;
@@ -343,6 +543,14 @@ static void input_task(void *arg)
             next_battery_update = rg_system_timer() + 2 * 1000000;
         }
 
+#ifdef RG_VOLUME_ADC_CHANNEL
+        if (rg_system_timer() >= next_volume_update)
+        {
+            volume_wheel_update();
+            next_volume_update = rg_system_timer() + RG_VOLUME_WHEEL_PERIOD_US;
+        }
+#endif
+
         rg_task_delay(10);
     }
 
@@ -357,13 +565,11 @@ void rg_input_init(void)
 #if defined(RG_GAMEPAD_ADC_MAP)
     RG_LOGI("Initializing ADC gamepad driver...");
     
-    adc_oneshot_unit_init_cfg_t init_config = {
-        .unit_id = ADC_UNIT_1,
-    };
-    esp_err_t err = adc_oneshot_new_unit(&init_config, &gamepad_adc_unit);
-    if (err != ESP_OK)
+    gamepad_adc_unit = adc_unit_acquire(ADC_UNIT_1);
+    esp_err_t err = ESP_OK;
+    if (!gamepad_adc_unit)
     {
-        RG_LOGE("Failed to initialize ADC unit for gamepad: %s", esp_err_to_name(err));
+        RG_LOGE("No ADC unit for gamepad");
     }
     else
     {
@@ -427,13 +633,11 @@ void rg_input_init(void)
 #if RG_BATTERY_DRIVER == 1
     RG_LOGI("Initializing ADC battery driver...");
     
-    adc_oneshot_unit_init_cfg_t init_config = {
-        .unit_id = RG_BATTERY_ADC_UNIT,
-    };
-    esp_err_t err = adc_oneshot_new_unit(&init_config, &adc_unit);
-    if (err != ESP_OK)
+    adc_unit = adc_unit_acquire(RG_BATTERY_ADC_UNIT);
+    esp_err_t err = ESP_OK;
+    if (!adc_unit)
     {
-        RG_LOGE("Failed to initialize ADC unit: %s", esp_err_to_name(err));
+        RG_LOGE("No ADC unit for battery");
     }
     else
     {
@@ -459,6 +663,29 @@ void rg_input_init(void)
                 RG_LOGE("Failed to initialize ADC calibration: %s", esp_err_to_name(err));
                 RG_LOGW("Using fallback voltage conversion");
             }
+        }
+    }
+#endif
+
+#ifdef RG_VOLUME_ADC_CHANNEL
+    RG_LOGI("Initializing volume wheel...");
+
+    volume_adc_unit = adc_unit_acquire(RG_VOLUME_ADC_UNIT);
+    if (!volume_adc_unit)
+    {
+        RG_LOGE("No ADC unit for the volume wheel");
+    }
+    else
+    {
+        adc_oneshot_chan_cfg_t vol_chan_config = {
+            .atten = ADC_ATTEN_DB_12,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        esp_err_t vol_err = adc_oneshot_config_channel(volume_adc_unit, RG_VOLUME_ADC_CHANNEL, &vol_chan_config);
+        if (vol_err != ESP_OK)
+        {
+            RG_LOGE("Failed to configure volume ADC channel: %s", esp_err_to_name(vol_err));
+            volume_adc_unit = NULL;
         }
     }
 #endif

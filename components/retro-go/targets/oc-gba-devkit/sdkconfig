@@ -274,7 +274,12 @@ CONFIG_ESP_SLEEP_PSRAM_LEAKAGE_WORKAROUND=y
 CONFIG_FATFS_VOLUME_COUNT=2
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_SECTOR_4096=y
+# Korean ROM and save filenames. ESP-IDF defaults FatFs to ANSI/OEM with code page
+# 437, and a name FatFs cannot render in the code page is returned as its 8.3 short
+# name instead -- so a card full of Korean-named ROMs came back as F-\xef\xbf\xbd~1.GBA and
+# nothing could be opened by name. LFN was already on; the encoding was the problem.
 CONFIG_FATFS_CODEPAGE_437=y
+CONFIG_FATFS_API_ENCODING_UTF_8=y
 CONFIG_FATFS_ALLOC_PREFER_EXTRAM=y
 CONFIG_FATFS_USE_FASTSEEK=y
 

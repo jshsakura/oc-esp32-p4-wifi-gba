@@ -1,0 +1,10 @@
+# PicoDrive keeps its machine state in static arrays rather than on the heap --
+# the Pico struct, the Sega CD's state, and cz80's two 128KB flag tables among
+# them. That is ~940KB of .bss, which does not fit in internal SRAM: the link
+# fails with "--enable-non-contiguous-regions discards section", which is
+# esp-idf's way of saying it ran out of internal RAM (BRINGUP 0.3-2).
+#
+# Letting .bss live in PSRAM is the whole point of having 32MB of it. Kept as a
+# per-app overlay rather than a target-wide setting because every other app here
+# fits, and giving them all external .bss would slow them down for nothing.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
