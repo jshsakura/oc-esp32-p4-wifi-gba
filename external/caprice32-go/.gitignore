@@ -1,0 +1,27 @@
+*.so
+*.o
+*.dll
+*.a
+*.gch
+*.orig
+*.rej
+*.log
+*.hex
+*.diff
+# gimp dumps
+*.raw
+# editors
+.vscode
+.venv
+
+# rom assets
+*.dsk
+*.sna
+*.cdt
+*.m3u
+
+# tests files
+tests/
+tests-db/
+unit-tests/test-db
+unit-tests/autorun
