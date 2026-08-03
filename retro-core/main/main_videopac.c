@@ -74,6 +74,13 @@ int     joystick_data[2][5] = {{0,0,0,0,0},{0,0,0,0,0}};  // [stick][up,down,lef
 void update_joy(void) { }
 
 static rg_app_t *app;
+/* Frame surfaces in PSRAM, not internal RAM.
+ *
+ * This core was a standalone app, where MEM_FAST was free -- it was the only
+ * emulator in the binary. Folded into retro-core it is one of twenty, and there
+ * are 42KB of internal RAM left across all of them. Asking for more does not
+ * fail loudly: rg_alloc warns "CAPS not fully met", hands back PSRAM anyway, and
+ * the mismatch surfaces later as an assert in heap_caps_free. */
 static rg_surface_t *updates[2];
 static rg_surface_t *currentUpdate;
 
@@ -370,8 +377,8 @@ void videopac_main(void)
     // panel — PSRAM sources would add latency the blit path was not designed
     // for. The two surfaces are 2 x 153 KB, which the other 320x240 apps
     // (retro-core SNES, gbsp) already carry without trouble.
-    updates[0] = rg_surface_create(VIS_WIDTH, VIS_HEIGHT, RG_PIXEL_565_LE, MEM_FAST);
-    updates[1] = rg_surface_create(VIS_WIDTH, VIS_HEIGHT, RG_PIXEL_565_LE, MEM_FAST);
+    updates[0] = rg_surface_create(VIS_WIDTH, VIS_HEIGHT, RG_PIXEL_565_LE, MEM_SLOW);
+    updates[1] = rg_surface_create(VIS_WIDTH, VIS_HEIGHT, RG_PIXEL_565_LE, MEM_SLOW);
     currentUpdate = updates[0];
 
     // The core's retro_blit writes one 340x250 RGB565 frame here per vblank

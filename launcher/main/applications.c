@@ -735,6 +735,11 @@ void applications_init(void)
     application("Sega Master System", "sms", "sms sg zip", "retro-core", 0);
     application("Sega Game Gear", "gg", "gg zip", "retro-core", 0);
     application("Sega Mega Drive", "md", "md gen bin zip", "gwenesis", 0);
+    // Sega CD on PicoDrive. Separate from the Mega Drive entry above because it is
+    // a separate core: gwenesis does not emulate the add-on. Needs a region BIOS in
+    // /bios (bios_CD_U.bin and friends) -- the core says so by name when it is
+    // missing, rather than reporting a bad image.
+    application("Sega CD", "segacd", "cue chd iso bin zip", "picodrive-go", 0);
     application("Coleco ColecoVision", "col", "col rom zip", "retro-core", 0);
     application("NEC PC Engine", "pce", "pce zip", "retro-core", 0);
     application("Atari Lynx", "lnx", "lnx zip", "retro-core", 64);

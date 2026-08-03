@@ -45,6 +45,13 @@ extern "C" {
 #define VB_SS_VER             2u
 
 static rg_app_t *app;
+/* Frame surfaces in PSRAM, not internal RAM.
+ *
+ * This core was a standalone app, where MEM_FAST was free -- it was the only
+ * emulator in the binary. Folded into retro-core it is one of twenty, and there
+ * are 42KB of internal RAM left across all of them. Asking for more does not
+ * fail loudly: rg_alloc warns "CAPS not fully met", hands back PSRAM anyway, and
+ * the mismatch surfaces later as an assert in heap_caps_free. */
 static rg_surface_t *updates[2];
 static rg_surface_t *currentUpdate;
 
@@ -407,8 +414,8 @@ extern "C" void vb_main(void)
 
     // Double-buffered RGB565 surfaces at native VB resolution (384x224).
     // retro-go's display path scales this to the physical screen.
-    updates[0] = rg_surface_create(VB_WIDTH, VB_HEIGHT, RG_PIXEL_565_LE, MEM_FAST);
-    updates[1] = rg_surface_create(VB_WIDTH, VB_HEIGHT, RG_PIXEL_565_LE, MEM_FAST);
+    updates[0] = rg_surface_create(VB_WIDTH, VB_HEIGHT, RG_PIXEL_565_LE, MEM_SLOW);
+    updates[1] = rg_surface_create(VB_WIDTH, VB_HEIGHT, RG_PIXEL_565_LE, MEM_SLOW);
     currentUpdate = updates[0];
 
     // --- Load ROM ---

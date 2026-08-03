@@ -297,7 +297,7 @@ void ngp_main(void)
 
     rgb565_lut_init();
 
-    update = rg_surface_create(SCREEN_WIDTH, SCREEN_HEIGHT, RG_PIXEL_565_LE, MEM_FAST);
+    update = rg_surface_create(SCREEN_WIDTH, SCREEN_HEIGHT, RG_PIXEL_565_LE, MEM_SLOW);
     if (!update)
         RG_PANIC("Could not create display surface");
 

@@ -33,6 +33,13 @@ unsigned char vidBuf[256 * 256];
 #define STELLA_MAX_HEIGHT 240
 
 static rg_app_t *app;
+/* Frame surfaces in PSRAM, not internal RAM.
+ *
+ * This core was a standalone app, where MEM_FAST was free -- it was the only
+ * emulator in the binary. Folded into retro-core it is one of twenty, and there
+ * are 42KB of internal RAM left across all of them. Asking for more does not
+ * fail loudly: rg_alloc warns "CAPS not fully met", hands back PSRAM anyway, and
+ * the mismatch surfaces later as an assert in heap_caps_free. */
 static rg_surface_t *updates[2];
 static rg_surface_t *currentUpdate;
 

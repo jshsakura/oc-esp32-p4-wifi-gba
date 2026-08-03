@@ -26,6 +26,13 @@
 #define GC_SAMPLES_PER_FRAME  (GC_SAMPLE_RATE / GC_FPS)  /* 367 */
 
 static rg_app_t *app;
+/* Frame surfaces in PSRAM, not internal RAM.
+ *
+ * This core was a standalone app, where MEM_FAST was free -- it was the only
+ * emulator in the binary. Folded into retro-core it is one of twenty, and there
+ * are 42KB of internal RAM left across all of them. Asking for more does not
+ * fail loudly: rg_alloc warns "CAPS not fully met", hands back PSRAM anyway, and
+ * the mismatch surfaces later as an assert in heap_caps_free. */
 static rg_surface_t *updates[2];
 static rg_surface_t *currentUpdate;
 
@@ -185,8 +192,8 @@ void gamecom_main(void)
     /* Two buffers on purpose: rg_display_submit() reads the surface in place on another
      * task through a one-deep blocking queue, so a single buffer both tears and stalls
      * the emulator on every submit. */
-    updates[0] = rg_surface_create(GAMECOM_W, GAMECOM_H, RG_PIXEL_PAL565_BE, MEM_FAST);
-    updates[1] = rg_surface_create(GAMECOM_W, GAMECOM_H, RG_PIXEL_PAL565_BE, MEM_FAST);
+    updates[0] = rg_surface_create(GAMECOM_W, GAMECOM_H, RG_PIXEL_PAL565_BE, MEM_SLOW);
+    updates[1] = rg_surface_create(GAMECOM_W, GAMECOM_H, RG_PIXEL_PAL565_BE, MEM_SLOW);
     currentUpdate = updates[0];
 
     uint32_t isz = 0, ksz = 0, csz = 0;

@@ -36,6 +36,13 @@
 #define SV_AUDIO_SCALE          700
 
 static rg_app_t *app;
+/* Frame surfaces in PSRAM, not internal RAM.
+ *
+ * This core was a standalone app, where MEM_FAST was free -- it was the only
+ * emulator in the binary. Folded into retro-core it is one of twenty, and there
+ * are 42KB of internal RAM left across all of them. Asking for more does not
+ * fail loudly: rg_alloc warns "CAPS not fully met", hands back PSRAM anyway, and
+ * the mismatch surfaces later as an assert in heap_caps_free. */
 static rg_surface_t *updates[2];
 static rg_surface_t *currentUpdate;
 
@@ -218,8 +225,8 @@ void supervision_main(void)
 
     // 160x160 RGB565, double buffered. The core writes one row per SV_W
     // pixels, which matches the surface stride.
-    updates[0] = rg_surface_create(SV_W, SV_H, RG_PIXEL_565_LE, MEM_FAST);
-    updates[1] = rg_surface_create(SV_W, SV_H, RG_PIXEL_565_LE, MEM_FAST);
+    updates[0] = rg_surface_create(SV_W, SV_H, RG_PIXEL_565_LE, MEM_SLOW);
+    updates[1] = rg_surface_create(SV_W, SV_H, RG_PIXEL_565_LE, MEM_SLOW);
     currentUpdate = updates[0];
 
     supervision_init();
