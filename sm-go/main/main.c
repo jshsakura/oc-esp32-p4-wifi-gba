@@ -44,6 +44,10 @@ static rg_surface_t *updates[2];
 static rg_surface_t *currentUpdate;
 static rg_app_t *app;
 static Snes *snes;
+
+/* The core's glue (components/sm/glue.c) needs the machine to route APU port
+ * writes to, and it is linked before main -- so it asks rather than reaching. */
+Snes *sm_get_snes(void) { return snes; }
 static uint8_t *snes_wram;
 static int16_t *sampleBuf;
 
@@ -169,7 +173,26 @@ void app_main(void)
         bool drawFrame = !skipFrames;
 
         snes->input1->currentState = read_input();
-        snes_runFrame(snes);
+
+        /* A frame is lines until the CPU wants its NMI, which is the vblank the
+         * guest is waiting for. There is no snes_runFrame() in this core -- the
+         * reference port drives it a line at a time for the same reason
+         * (porting/sm/main_sm.c), because walking the dot clock two dots at a
+         * time spends most of ~178,000 calls a frame on a counter increment and
+         * six branches that never fire. */
+        snes->hPos = snes->vPos = 0;
+        while (!snes->cpu->nmiWanted)
+        {
+            snes_run_line(snes);
+            /* The reference port calls into the game's own Vector_IRQ here,
+             * because it runs a decompiled Super Metroid alongside the emulator
+             * and can hand the interrupt to native code. There is no native game
+             * here -- the guest is a plain ROM -- so the CPU takes it the way the
+             * hardware would, through irqWanted. */
+            if (snes->vIrqEnabled && (snes->vPos - 1) == snes->vTimer)
+                snes->cpu->irqWanted = true;
+        }
+        snes->cpu->nmiWanted = false;
 
         if (drawFrame)
         {
@@ -188,4 +211,14 @@ void app_main(void)
         else if (skipFrames > 0)
             skipFrames--;
     }
+}
+
+/* The core aborts through this on an unrecoverable state -- a bad mapper, a
+ * savestate it cannot read. It is declared NORETURN, so it must not return:
+ * RG_PANIC ends in a crash handler that writes the trace and reboots, which is
+ * the closest this firmware has to the reference port's behaviour. */
+void Die(const char *error)
+{
+    RG_PANIC(error ?: "sm core aborted");
+    for (;;) { }
 }

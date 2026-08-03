@@ -28,7 +28,7 @@ set(SM_SRCS
     "src/snes/apu.c"
 )
 
-set(COMPONENT_SRCS ${SM_SRCS})
+set(COMPONENT_SRCS ${SM_SRCS} "glue.c")
 set(COMPONENT_ADD_INCLUDEDIRS "src" "src/snes")
 set(COMPONENT_REQUIRES "retro-go")
 register_component()
