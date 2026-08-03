@@ -542,6 +542,7 @@ void snes_main(void)
         }
 
         int64_t startTime = rg_system_timer();
+        int64_t _t0 = startTime;
         bool drawFrame = (skipFrames == 0);
         bool slowFrame = false;
 
@@ -553,6 +554,7 @@ void snes_main(void)
         rg_mutex_give(frame_mutex);
 
         S9xMainLoop();
+        int64_t _t1 = rg_system_timer();
 
     #ifdef USE_AUDIO_TASK
         if (apu_enabled)
@@ -577,6 +579,31 @@ void snes_main(void)
 
             slowFrame = !rg_display_sync(false);
             rg_display_submit(currentUpdate, 0);
+        }
+        {   /* Where the SNES frame goes. The GBA turned out to spend more of its wall clock
+             * on scaffolding than on the interpreter, so price the parts before proposing
+             * anything. Reported once a second next to the FPS line. */
+            static int64_t p_main = 0, p_rest = 0, p_next = 0;
+            int64_t _t2 = rg_system_timer();
+            p_main += _t1 - _t0;
+            p_rest += _t2 - _t1;
+            if (_t2 >= p_next)
+            {
+                if (p_next)
+#ifdef RG_BENCH_PROFILE_APU
+                {
+                    extern int64_t g_apu_us; extern uint32_t g_apu_calls;
+                    RG_LOGW("PROF/s: S9xMainLoop %.1f%%  rest %.1f%%  SPC700 %.1f%% (%u drains)",
+                            p_main / 10000.f, p_rest / 10000.f, g_apu_us / 10000.f, g_apu_calls);
+                    g_apu_us = 0; g_apu_calls = 0;
+                }
+#else
+                    RG_LOGW("PROF/s: S9xMainLoop %.1f%%  rest-of-frame %.1f%%  (apu %s)",
+                            p_main / 10000.f, p_rest / 10000.f, apu_enabled ? "on" : "off");
+#endif
+                p_main = p_rest = 0;
+                p_next = _t2 + 1000000;
+            }
         }
 
     #ifndef USE_AUDIO_TASK

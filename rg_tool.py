@@ -16,7 +16,7 @@ DEFAULT_TARGET = os.getenv("RG_TOOL_TARGET", "esp32p4")
 DEFAULT_BAUD = os.getenv("RG_TOOL_BAUD", "1152000")
 DEFAULT_PORT = os.getenv("RG_TOOL_PORT", "COM3")
 # DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core")
-DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core gbsp gwenesis fmsx prboom-go fake08 stella-go ngpocket-go supervision-go pkmini-go wswan-go vb-go videopac-go fceumm-go")
+DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core gbsp gwenesis fmsx prboom-go fake08 stella-go prosystem-go picodrive-go tamalib-go caprice32-go ngpocket-go supervision-go pkmini-go wswan-go vb-go videopac-go fceumm-go tgbdual-go zxs-go gamecom-go")
 DEFAULT_NO_NETWORKING = os.getenv("RG_TOOL_NO_NETWORKING", "0") == "1"
 PROJECT_NAME = os.getenv("PROJECT_NAME", "retro-go")
 PROJECT_VER = os.getenv("PROJECT_VER", "2.0")
@@ -24,13 +24,22 @@ PROJECT_ICON = os.getenv("PROJECT_ICON", "assets/icon.raw")
 PROJECT_APPS = {
   # Project name  Type, SubType, Size (must be 64KB aligned)
   'launcher':     [0, 0, 983040],
-  'retro-core':   [0, 0, 983040],
+  # retro-core is eleven systems in one app and is the only one that has ever overflowed:
+  # 1,769,760 bytes against a 1,769,472 partition, over by 288. An app that overflows is not
+  # rejected loudly -- the bootloader silently starts a different app -- so the floor carries
+  # real headroom rather than tracking the binary. (build_image() still grows it to fit.)
+  'retro-core':   [0, 0, 1966080],
   'prboom-go':    [0, 0, 851968],
   'gwenesis':     [0, 0, 983040],
   'fmsx':         [0, 0, 589824],
   'gbsp':         [0, 0, 851968],
   'fake08':       [0, 0, 983040],
   'stella-go':    [0, 0, 851968],
+  'prosystem-go': [0, 0, 851968],
+  'picodrive-go': [0, 0, 1703936],
+  'tamalib-go':   [0, 0, 589824],
+  'caprice32-go': [0, 0, 1441792],
+  'sm-go':        [0, 0, 1310720],
   'ngpocket-go':  [0, 0, 1114112],
   'supervision-go': [0, 0, 589824],
   'pkmini-go':      [0, 0, 589824],
@@ -38,6 +47,9 @@ PROJECT_APPS = {
   'vb-go':          [0, 0, 851968],
   'videopac-go':    [0, 0, 1048576],
   'fceumm-go':      [0, 0, 2097152],
+  'tgbdual-go':     [0, 0, 1048576],
+  'zxs-go':         [0, 0, 1179648],
+  'gamecom-go':     [0, 0, 1179648],
 }
 # PROJECT_APPS = {}
 # for t in glob.glob("*/CMakeLists.txt"):
@@ -203,6 +215,15 @@ def build_app(app, device_type, with_profiling=False, no_networking=False, is_re
     args.append(f"-DRG_PROJECT_VER={PROJECT_VER}")
     args.append(f"-DRG_BUILD_TARGET=RG_TARGET_{re.sub(r'[^A-Z0-9]', '_', device_type.upper())}")
     args.append(f"-DRG_BUILD_RELEASE={1 if is_release else 0}")
+    # Bench harness passthrough: with these set, rg_system.c picks a ROM by scanning
+    # /sd/roms/<dir> for a name containing <match>, which is the only way to launch a
+    # game on a board with no buttons and the card inside the case. Env rather than a
+    # flag because it is a measurement knob, not part of any build we ship.
+    bench_dir = os.getenv("RG_BENCH_ROM_DIR")
+    bench_match = os.getenv("RG_BENCH_ROM_MATCH")
+    if bench_dir and bench_match:
+        args.append(f"-DRG_BENCH_ROM_DIR={bench_dir}")
+        args.append(f"-DRG_BENCH_ROM_MATCH={bench_match}")
     args.append(f"-DRG_ENABLE_PROFILING={1 if with_profiling else 0}")
     args.append(f"-DRG_ENABLE_NETWORKING={0 if no_networking else 1}")
     with open("partitions.csv", "w") as f:

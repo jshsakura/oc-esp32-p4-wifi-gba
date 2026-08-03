@@ -16,3 +16,9 @@ rg_setup_compile_options(
     -fdata-sections
     -fomit-frame-pointer
 )
+
+# Bench only -- see the call site in src/cpuexec.c. Skips the SPC700/DSP so the work can be
+# priced; the front-end's audio toggle does not reach that code.
+if(RG_BENCH_PROFILE_APU)
+    component_compile_options(-DRG_BENCH_PROFILE_APU=1)
+endif()

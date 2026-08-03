@@ -724,8 +724,8 @@ void applications_init(void)
 {
     application("Nintendo Entertainment System", "nes", "nes fc fds nsf zip", "fceumm-go", 16);
     application("Super Nintendo", "snes", "smc sfc zip", "retro-core", 0);
-    application("Nintendo Gameboy", "gb", "gb gbc zip", "retro-core", 0);
-    application("Nintendo Gameboy Color", "gbc", "gbc gb zip", "retro-core", 0);
+    application("Nintendo Gameboy", "gb", "gb gbc zip", "tgbdual-go", 0);
+    application("Nintendo Gameboy Color", "gbc", "gbc gb zip", "tgbdual-go", 0);
     application("Nintendo Gameboy Advance", "gba", "gba zip", "gbsp", 0);
     application("Nintendo Game & Watch", "gw", "gw", "retro-core", 0);
     application("Sega SG-1000", "sg1", "sms sg sg1", "retro-core", 0);
@@ -736,6 +736,8 @@ void applications_init(void)
     application("NEC PC Engine", "pce", "pce zip", "retro-core", 0);
     application("Atari Lynx", "lnx", "lnx zip", "retro-core", 64);
     application("Atari 2600", "a26", "a26 bin zip", "stella-go", 0);
+    application("Atari 7800", "a78", "a78 bin zip", "prosystem-go", 0);
+    application("Tamagotchi", "tama", "tama bin zip", "tamalib-go", 0);
     application("Neo Geo Pocket Color", "ngp", "ngp ngc zip", "ngpocket-go", 0);
     application("DOOM", "doom", "wad zip", "prboom-go", 0);
     application("Watara Supervision", "supervision", "sv bin zip", "supervision-go", 0);
@@ -744,6 +746,9 @@ void applications_init(void)
     application("Nintendo Virtual Boy", "vb", "vb bin zip", "vb-go", 0);
     application("Magnavox Odyssey2", "videopac", "bin rom zip", "videopac-go", 0);
     application("MSX", "msx", "rom mx1 mx2 dsk", "fmsx", 0);
+    application("Amstrad CPC", "cpc", "dsk sna cdt cpr zip", "caprice32-go", 0);
+    application("Sinclair ZX Spectrum", "zxs", "z80 sna tzx tap pzx zip", "zxs-go", 0);
+    application("Tiger Game.com", "gamecom", "tgc bin zip", "gamecom-go", 0);
     // Carts are either .p8 text or .p8.png, where the cart is steganographed into the pixels
     // of the label image -- so "png" here is a cart extension, not a cover.
     application("PICO-8", "p8", "p8 png", "fake08", 0);

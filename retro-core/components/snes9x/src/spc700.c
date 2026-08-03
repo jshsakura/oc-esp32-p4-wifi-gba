@@ -332,6 +332,9 @@ if (!(S9xAPUGetByteZ (Work8) & (1 << (b)))) \
 else \
     IAPU.PC += 3
 
+int64_t g_apu_us = 0;
+uint32_t g_apu_calls = 0;
+
 void APUExecute(void/*int32_t target_cycles*/)
 {
    int8_t   Int8;

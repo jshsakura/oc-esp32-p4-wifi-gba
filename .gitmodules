@@ -12,3 +12,6 @@
 [submodule "external/fceumm-go"]
 	path = external/fceumm-go
 	url = https://github.com/sylverb/fceumm-go.git
+[submodule "external/tgbdual-go"]
+	path = external/tgbdual-go
+	url = https://github.com/sylverb/tgbdual-go.git
