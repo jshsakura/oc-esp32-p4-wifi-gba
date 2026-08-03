@@ -1,0 +1,22 @@
+# potator's state goes to PSRAM.
+#
+# This one built clean without a fragment, which is exactly why it needed one.
+# retro-core now holds twenty systems, and their combined internal .bss grew
+# until the low heap region -- which starts where the low .bss ends -- ran up
+# into the HIGH .bss range. The allocator then hands out addresses that are also
+# statics: they are correctly zeroed at startup and quietly overwritten later by
+# whatever malloc'd that address. It surfaced here as gpu_set_ghosting() freeing
+# three garbage pointers that had been NULL a moment earlier.
+#
+# The lesson worth keeping: "it links" is not the test. Internal .bss has to stay
+# clear of the heap, and every core folded in pushes it closer.
+[scheme:potator_extram]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+    legacy_bss -> extern_ram
+
+[mapping:potator_bss]
+archive: libpotator.a
+entries:
+    * (potator_extram)

@@ -1,0 +1,36 @@
+# Redirect fceumm's .bss into PSRAM (.ext_ram.bss via mapping[extern_ram]).
+#
+# The core's BSS is ~1.85 MiB (ARead/BWrite 512 KiB CPU dispatch tables,
+# dphaseTable/tllTable 384 KiB OPLL lookup tables, fceumm_flash_buf 513 KiB
+# for UNROM-512, WaveHi 160 KiB sound buffer, etc.). Internal SRAM on the
+# ESP32-P4 is only ~567 KiB across sram_low + sram_high, so the linker
+# (--enable-non-contiguous-regions) discards ~1.7 MiB of .sbss from the
+# ESP-IDF system libraries once fceumm's .bss fills SRAM.
+#
+# This fragment tells ldgen to route every .bss / COMMON input section from
+# libfceumm.a through the "extern_ram" mapping target, which the ESP-IDF
+# linker script template places in the .ext_ram.bss output section (> ext_ram_seg,
+# i.e. PSRAM). CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y (enabled in the
+# per-app sdkconfig overlay) is what makes that mapping target available.
+#
+# Trade-off: PSRAM access is cached but higher-latency than SRAM. The hottest
+# tables here (ARead/BWrite) are touched on every CPU memory cycle, so this is
+# a correctness-first placement; once the port runs, the dispatch tables can be
+# selectively pulled back into SRAM if profiling shows a bottleneck.
+[sections:fceumm_bss]
+entries:
+    .bss+
+
+[sections:fceumm_common]
+entries:
+    COMMON
+
+[scheme:fceumm_ext_ram]
+entries:
+    fceumm_bss -> extern_ram
+    fceumm_common -> extern_ram
+
+[mapping:fceumm]
+archive: libfceumm.a
+entries:
+    * (fceumm_ext_ram)

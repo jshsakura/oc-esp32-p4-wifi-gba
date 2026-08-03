@@ -3,3 +3,14 @@
 # That placement needs external .bss enabled; without it the mapping resolves to
 # dram0_bss and the link fails on internal RAM exactly as before.
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+# Only one system runs per boot, so twenty cores' worth of static state has no
+# business sitting in internal RAM at once -- the reference port states the same
+# rule outright: every core is an overlay at the same address. Here the overlay
+# is PSRAM: each folded core maps its .bss out through a linker fragment, and
+# internal RAM is left for the framework and whatever the ACTIVE core allocates.
+#
+# Stella is C++ with iostream and its call chain now runs on top of retro-core's
+# app_main frame rather than at the base of its own task, which overflowed the
+# 8KB default and panicked with a stack protection fault.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384

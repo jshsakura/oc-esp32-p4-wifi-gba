@@ -1,0 +1,22 @@
+# pokemini's state goes to PSRAM.
+#
+# Nothing has gone wrong here yet -- pokemini has no ROM on the card and has never
+# been run on the device. This fragment is the rule applied ahead of the failure,
+# not a repair after one: only one system runs per boot, so no folded core's
+# statics belong in internal RAM, and PM_RAM alone is 8KB against the ~42KB the
+# twenty systems have left between them.
+#
+# potator is why this is prophylactic rather than optional. It also "built clean
+# without a fragment" and it was the one that broke: its statics collided with the
+# low heap, so screenBuffers[] was correctly zeroed at startup and held 0x80828d19
+# by the time free() reached it. "It links" was not the test there and is not here.
+[scheme:pokemini_extram]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+    legacy_bss -> extern_ram
+
+[mapping:pokemini_bss]
+archive: libpokemini.a
+entries:
+    * (pokemini_extram)

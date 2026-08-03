@@ -15,3 +15,6 @@
 [submodule "external/tgbdual-go"]
 	path = external/tgbdual-go
 	url = https://github.com/sylverb/tgbdual-go.git
+[submodule "external/prosystem-go"]
+	path = external/prosystem-go
+	url = https://github.com/sylverb/prosystem-go.git
