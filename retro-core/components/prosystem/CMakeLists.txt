@@ -27,6 +27,7 @@ set(PROSYSTEM_LRC_SRCS
 set(COMPONENT_SRCS ${PROSYSTEM_SRCS} ${PROSYSTEM_LRC_SRCS})
 set(COMPONENT_ADD_INCLUDEDIRS "src/core" "src/libretro-common/include")
 set(COMPONENT_REQUIRES "retro-go")
+set(COMPONENT_ADD_LDFRAGMENTS "linker.lf")
 register_component()
 
 rg_setup_compile_options(

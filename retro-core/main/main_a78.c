@@ -8,7 +8,7 @@
  * paletted (RG_PIXEL_PAL565_BE) so the display path expands it, which is the
  * same arrangement the Master System and PC Engine cores use here.
  */
-#include <rg_system.h>
+#include "shared.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -147,7 +147,13 @@ static uint8_t *load_rom(const char *path, uint32_t *out_size)
     return data;
 }
 
-void app_main(void)
+/* Entry point for retro-core's dispatcher, not an app of its own.
+ *
+ * This started as a standalone app and was folded in: a retro-go app carries its
+ * own ~950KB copy of the framework, which for a 7800 core is most of the binary
+ * and, multiplied across every small system, is what put us past esp-idf's
+ * sixteen-OTA-partition limit. See docs/APP_PARTITION_CEILING.md. */
+void a78_main(void)
 {
     const rg_handlers_t handlers = {
         .loadState = &load_state_handler,
@@ -157,7 +163,7 @@ void app_main(void)
         .event = &event_handler,
     };
 
-    app = rg_system_init(A78_SAMPLE_RATE, &handlers, NULL);
+    app = rg_system_reinit(A78_SAMPLE_RATE, &handlers, NULL);
 
     /* Two buffers on purpose: rg_display_submit() reads the surface in place on
      * another task through a one-deep blocking queue, so a single buffer both

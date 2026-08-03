@@ -1,0 +1,5 @@
+# retro-core now holds twelve systems, and the ones folded in after the original
+# eleven push their static state to PSRAM through per-component linker fragments.
+# That placement needs external .bss enabled; without it the mapping resolves to
+# dram0_bss and the link fails on internal RAM exactly as before.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
