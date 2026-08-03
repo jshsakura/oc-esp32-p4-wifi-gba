@@ -1,19 +1,18 @@
-# The 7800's state goes to PSRAM.
+# O2EM's state goes to PSRAM.
 #
 # This core was a standalone app until it was folded into retro-core, and folding
 # trades one ceiling for another: the flash saving is a whole ~950KB framework
 # copy and a partition, but every static the core carries now lands in the same
-# internal RAM as the eleven systems already here. maria_surface alone is 93KB,
-# and adding it was enough to fail the link with esp-idf's "discards section",
-# which is how it reports running out of internal RAM (BRINGUP 0.3-2).
+# internal RAM as the systems already here. o2em_vmachine.c's snapedlines alone
+# is (MAXLINES+2*MAXSNAP)*256*2 = 300KB, and adding it was enough to fail the
+# link with esp-idf's "discards section", which is how it reports running out
+# of internal RAM (BRINGUP 0.3-2).
 #
 # The scheme is defined here rather than reusing esp-idf's extram_bss: that one
 # lives in esp_wifi's fragment, and this app builds with networking off, so the
 # name resolves to nothing -- silently, leaving the link failing at exactly the
 # same byte count as before.
-#
-# Expect to write one of these for every core folded in after this.
-[scheme:prosystem_extram]
+[scheme:o2em_extram]
 entries:
     bss -> extern_ram
     common -> extern_ram
@@ -22,7 +21,7 @@ entries:
     # looks like it worked right up until something else needs the space.
     legacy_bss -> extern_ram
 
-[mapping:prosystem_bss]
-archive: libprosystem.a
+[mapping:o2em_bss]
+archive: libo2em.a
 entries:
-    * (prosystem_extram)
+    * (o2em_extram)

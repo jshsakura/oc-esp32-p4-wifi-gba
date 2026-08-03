@@ -1,0 +1,58 @@
+# Stella's C++ runtime tail goes to PSRAM.
+#
+# This core was a standalone app until it was folded into retro-core, and folding
+# trades one ceiling for another: the flash saving is a whole ~950KB framework
+# copy and a partition, but every static the core carries now lands in the same
+# internal RAM as the systems already here.
+#
+# Unlike the other folded cores, the overflow here isn't in libstella.a itself --
+# it's in libstdc++.a and a handful of libc.a objects. bspf.hxx pulls <iostream>
+# into nearly every translation unit (cart bankswitch logging via cout), and
+# iostream drags in the full <locale>/<ios> static footprint: the cin/cout/cerr/
+# clog objects themselves, every facet's id (num_get/num_put/collate/codecvt/
+# messages, narrow and wide), and the ctype/string-inst tables behind them. That
+# graph turned out to be wider than the first attempt at listing objects here
+# caught -- each fix surfaced more of the same closure -- so libstdc++.a is
+# mapped wholesale instead of object-by-object. Nothing else in retro-core links
+# against libstdc++'s iostream/locale layer (this is the only C++ core using it;
+# the other C++ cores here use printf-style IO), so nothing else's placement
+# changes. libc.a stays scoped to the exact handful of objects the link named --
+# that archive's hot path (stdio's actual read/write, memcpy, ROM loading) is
+# shared by every other system here and must not move.
+#
+# legacy_bss (esp_common/common.lf's name for .sbss/.scommon/.dynbss and the
+# other small-data/gnu.linkonce variants) has to be routed too, separately from
+# plain bss: RISC-V puts small statics like locale's near-empty facet "id"
+# objects in .sbss for gp-relative access, and the base linker script's
+# .dram0.bss output section pulls in every object's .sbss unconditionally
+# unless the owning archive is placed by one of these mapping fragments first.
+[scheme:stella_extram]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+    legacy_bss -> extern_ram
+
+[mapping:stella_bss]
+# TIA.cpp's precomputed pixel-mask lookup tables -- built once in TIA::init()
+# and read on every scanline thereafter -- are 273664 bytes on their own
+# (ourPlayerPositionResetWhenTable[8][160][160] alone is 204800), the same
+# shape of problem prosystem's maria_surface and oswan's IRAM were.
+archive: libstella.a
+entries:
+    * (stella_extram)
+
+[mapping:stella_libstdcxx_bss]
+archive: libstdc++.a
+entries:
+    * (stella_extram)
+
+[mapping:stella_libc_bss]
+archive: libc.a
+entries:
+    libc_a-__atexit (stella_extram)
+    libc_a-__call_atexit (stella_extram)
+    libc_a-environ (stella_extram)
+    libc_a-findfp (stella_extram)
+    libc_a-setenv_r (stella_extram)
+    libc_a-tzset_r (stella_extram)
+    libc_a-tzvars (stella_extram)

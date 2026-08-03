@@ -1,0 +1,30 @@
+# The Virtual Boy's state goes to PSRAM.
+#
+# This core was a standalone app until it was folded into retro-core, and folding
+# trades one ceiling for another: the flash saving is a whole ~950KB framework
+# copy and a partition, but every static the core carries now lands in the same
+# internal RAM as the systems already here. video_soft.cpp's texture/character
+# cache (tDSPCACHE.CharacterCache and friends) alone is 196608 bytes, and adding
+# it was enough to fail the link with esp-idf's "discards section", which is how
+# it reports running out of internal RAM (BRINGUP 0.3-2).
+#
+# legacy_bss (.sbss and friends) has to be routed alongside bss/common: small
+# statics are well within RISC-V's gp-relative small-data threshold, and the
+# base linker script pulls every object's .sbss into internal RAM unconditionally
+# unless the owning archive is placed by a mapping fragment first -- the same
+# thing stella's and zxs's folds hit.
+#
+# The scheme is defined here rather than reusing esp-idf's extram_bss: that one
+# lives in esp_wifi's fragment, and this app builds with networking off, so the
+# name resolves to nothing -- silently, leaving the link failing at exactly the
+# same byte count as before.
+[scheme:red_viper_extram]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+    legacy_bss -> extern_ram
+
+[mapping:red_viper_bss]
+archive: libred-viper.a
+entries:
+    * (red_viper_extram)

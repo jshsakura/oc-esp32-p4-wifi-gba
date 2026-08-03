@@ -9,7 +9,7 @@
 // modelled on supervision-go/main/main.c and the STM32 reference.
 //============================================================================
 
-#include <rg_system.h>
+#include "shared.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,8 +34,11 @@ int ws_create_from_flash(const uint8_t *data, uint32_t size);
 // WonderSwan runs at ~75 FPS. Audio is generated at 44100 Hz, so one frame
 // is 44100/75 = 588 stereo sample pairs.
 #define WS_FPS              75
-#define AUDIO_SAMPLE_RATE   44100
-#define AUDIO_SAMPLES_PER_FRAME (AUDIO_SAMPLE_RATE / WS_FPS)
+// Named WS_AUDIO_SAMPLE_RATE rather than AUDIO_SAMPLE_RATE: that name is
+// already defined in shared.h (folded cores share one translation unit's
+// worth of headers with the rest of retro-core), and to a different value.
+#define WS_AUDIO_SAMPLE_RATE 44100
+#define AUDIO_SAMPLES_PER_FRAME (WS_AUDIO_SAMPLE_RATE / WS_FPS)
 
 // The APU ring buffer (WSApu.c): must match the non-NATIVE_AUDIO layout.
 #define WS_SND_RNGSIZE      (8 * 512)
@@ -54,7 +57,7 @@ static rg_surface_t ws_surface = {
     .stride = WS_STRIDE * 2,    // bytes per row (240 pixels * 2)
     .offset = WS_XOFF * 2,      // byte offset to first visible pixel (8 * 2)
     .format = RG_PIXEL_565_LE,
-    .data = NULL,               // set in app_main after core init
+    .data = NULL,               // set in wsc_main after core init
 };
 
 // gameName is used by WsLoadEeprom/WsSaveEeprom to build the internal-EEPROM
@@ -215,9 +218,7 @@ static void ws_audio_submit(rg_audio_frame_t *mixbuf, int count)
         rBuf -= WS_SND_RNGSIZE;
 }
 
-extern void app_main(void);
-
-void app_main(void)
+void wsc_main(void)
 {
     const rg_handlers_t handlers = {
         .loadState = &load_state_handler,
@@ -227,7 +228,7 @@ void app_main(void)
         .event = &event_handler,
     };
 
-    app = rg_system_init(AUDIO_SAMPLE_RATE, &handlers, NULL);
+    app = rg_system_reinit(WS_AUDIO_SAMPLE_RATE, &handlers, NULL);
 
     // Point the display surface at the core's framebuffer.
     ws_surface.data = FrameBuffer;

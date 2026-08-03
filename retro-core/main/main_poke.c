@@ -14,7 +14,7 @@
 // retro-go's display layer handles all upscaling.
 //============================================================================
 
-#include <rg_system.h>
+#include "shared.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -180,7 +180,7 @@ static uint8_t *load_rom(const char *path, uint32_t *out_size)
     return data;
 }
 
-void app_main(void)
+void poke_main(void)
 {
     const rg_handlers_t handlers = {
         .loadState = &load_state_handler,
@@ -191,7 +191,7 @@ void app_main(void)
         .options = &options_handler,
     };
 
-    app = rg_system_init(PKMINI_SAMPLE_RATE, &handlers, NULL);
+    app = rg_system_reinit(PKMINI_SAMPLE_RATE, &handlers, NULL);
 
     // 96x64 RGB565, double buffered. The 1x1 video spec writes one row per
     // PKMINI_WIDTH pixels, matching the surface stride exactly.

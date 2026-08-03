@@ -8,7 +8,7 @@
 // audio, save state), modelled on gbsp/main/main.c and the STM32H7 reference.
 //============================================================================
 
-#include <rg_system.h>
+#include "shared.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,8 +20,11 @@
 // stereo sample pairs. Keeping these derived from the core's own constants
 // guarantees audio stays pitch-correct regardless of the target clock.
 #define SV_FPS                  50
-#define AUDIO_SAMPLE_RATE       SV_SAMPLE_RATE
-#define AUDIO_SAMPLES_PER_FRAME (AUDIO_SAMPLE_RATE / SV_FPS)
+// Named SV_AUDIO_SAMPLE_RATE rather than AUDIO_SAMPLE_RATE: that name is
+// already defined in shared.h (folded cores share one translation unit's
+// worth of headers with the rest of retro-core), and to a different value.
+#define SV_AUDIO_SAMPLE_RATE    SV_SAMPLE_RATE
+#define AUDIO_SAMPLES_PER_FRAME (SV_AUDIO_SAMPLE_RATE / SV_FPS)
 
 // supervision_save_state() writes its own length; the STM32 reference uses
 // 24741 bytes. We round up generously and rely on the returned size for I/O.
@@ -200,9 +203,7 @@ static uint8_t *load_rom(const char *path, uint32_t *out_size)
     return data;
 }
 
-extern void app_main(void);
-
-void app_main(void)
+void supervision_main(void)
 {
     const rg_handlers_t handlers = {
         .loadState = &load_state_handler,
@@ -213,7 +214,7 @@ void app_main(void)
         .options = &options_handler,
     };
 
-    app = rg_system_init(AUDIO_SAMPLE_RATE, &handlers, NULL);
+    app = rg_system_reinit(SV_AUDIO_SAMPLE_RATE, &handlers, NULL);
 
     // 160x160 RGB565, double buffered. The core writes one row per SV_W
     // pixels, which matches the surface stride.

@@ -25,6 +25,24 @@ void app_main(void)
         snes_main();
     else if (strcmp(app->configNs, "a78") == 0)
         a78_main();
+    else if (strcmp(app->configNs, "supervision") == 0)
+        supervision_main();
+    else if (strcmp(app->configNs, "poke") == 0)
+        poke_main();
+    else if (strcmp(app->configNs, "videopac") == 0)
+        videopac_main();
+    else if (strcmp(app->configNs, "wsc") == 0)
+        wsc_main();
+    else if (strcmp(app->configNs, "a26") == 0)
+        a26_main();
+    else if (strcmp(app->configNs, "ngp") == 0)
+        ngp_main();
+    else if (strcmp(app->configNs, "zxs") == 0)
+        zxs_main();
+    else if (strcmp(app->configNs, "gamecom") == 0)
+        gamecom_main();
+    else if (strcmp(app->configNs, "vb") == 0)
+        vb_main();
 #ifndef __TINYC__
     else if (strcmp(app->configNs, "lnx") == 0)
         lynx_main();

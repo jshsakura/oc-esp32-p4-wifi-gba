@@ -1,5 +1,0 @@
-cmake_minimum_required(VERSION 3.5)
-set(COMPONENTS "main retro-go red-viper app_trace bootloader esptool_py")
-set(RG_ENABLE_NETWORKING 0)
-include(../base.cmake)
-project(vb-go)
