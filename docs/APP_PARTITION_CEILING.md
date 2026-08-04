@@ -236,6 +236,52 @@ P4 Kconfig 도움말이 직접 적고 있다:
 아니라 로드 시간이고 코어 실행당 한 번이라 그 자체로는 문제가 아니지만, 크기에 어떻게
 비례하는지는 확인해야 한다 — 1MB 코어가 선형이면 4초다.
 
+### 부트로더를 다시 굽고 나서 (2026-08-04) — 성능 질문은 끝났다
+
+부트로더를 `XIP_FROM_PSRAM` 지원으로 다시 빌드해 `0x2000`에 구웠다(구본은
+`scratchpad/bootloader_backup.bin`, md5 `233f8530...`). 그러자 sm-go가 앱 전체를
+PSRAM에서 실행하며 부팅한다 — 맵에서 `.flash.text 0x48000020`, 499,296바이트다.
+
+| 코드 위치 | SNES us/frame |
+|---|---|
+| 플래시 XIP (기준) | 32,986 / 33,043 / 33,101 |
+| **PSRAM 실행** | **32,929** |
+
+**명령어 페치를 PSRAM으로 옮기는 비용이 측정 불가능하다.** 두 버스로 갈라져 있어
+경합이 날 거라던 우려는 이 워크로드에서는 나타나지 않았다. **런타임 로딩 설계의
+성패를 가른다던 질문의 답은 "괜찮다"이다.**
+
+새 부트로더는 XIP 안 쓰는 앱들도 정상 부팅시킨다(snes 35,067 / a26 5,743 / md 12,570
+/ gba 19,918 — 전부 기존과 노이즈 안).
+
+### 남은 벽은 성능이 아니라 elf_loader 쪽이다
+
+재배치까지는 간다. 실행에서 두 갈래 모두 막힌다:
+
+**PSRAM 적재(기본값) + XIP** → 이미지가 부팅 불가. `invalid segment length
+0xffffffff`. 플래시는 바이트 단위로 검증되고 `esptool image_info`도 유효하다고 한다.
+원인은 컴포넌트의 `linker.lf`로 보인다 — **모든** 아카이브의 `.got`/`.got.plt`를
+`flash_rodata`로 보내는데, XIP가 바로 그 `flash_rodata`를 PSRAM으로 옮긴다.
+
+**내부 SRAM 적재(`ELF_LOADER_LOAD_PSRAM=n`)** → `esp_elf_malloc()`이 실행 가능
+메모리를 요구하지 않는다. P4는 `ELF_LOADER_BUS_ADDRESS_MIRROR`가 `n`이라 이 분기를
+탄다:
+
+    #ifdef CONFIG_ELF_LOADER_LOAD_PSRAM
+        caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    #else
+        caps = MALLOC_CAP_8BIT;      // MALLOC_CAP_EXEC가 없다
+    #endif
+
+그래서 첫 명령어에서 `Instruction access fault`(MCAUSE 1, MTVAL = entry)로 죽는다.
+`MALLOC_CAP_EXEC`를 넣어봤더니 이번엔 `-ENOMEM` — **P4에는 EXEC 힙 자체가 없다.**
+즉 이 컴포넌트는 P4에서 PSRAM 적재를 전제하고 있고, 내부 SRAM 경로는 현재 성립하지
+않는다.
+
+**정리하면 남은 일은 컴포넌트 쪽이다.** 우리 코드나 하드웨어 문제가 아니다. 둘 중
+하나를 풀면 된다 — XIP와 공존하도록 `.got` 배치를 손보거나(우리 쪽 프래그먼트로
+덮어쓸 수 있을지 확인), P4에서 EXEC 가능한 내부 메모리를 쓰게 하거나.
+
 ### 아직 답이 없는 질문
 
 **PSRAM에서 명령어를 페치하면 얼마나 느려지는가.** 부트로더를 다시 굽고 나면 가장
