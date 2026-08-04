@@ -61,20 +61,51 @@
 `gbsp`(GBA), `gwenesis`(메가드라이브), `picodrive-go`(Sega CD/32X), `sm-go`(SNES 대체 코어),
 `caprice32-go`, `fmsx`, `prboom-go`, `fake08`, `fceumm-go`, `tgbdual-go`, `tamalib-go`.
 
+⚠️ **`fceumm-go`와 `tgbdual-go`는 빌드·플래시는 되지만 부팅이 불가능하다.** 파티션이
+16MB 위(`0x1030000`, `0x1230000`)에 있고 부트로더가 거기서 못 뜬다. 게다가 조용히
+실패하지 않고 MSPI를 엉키게 해 **런처 포함 전 슬롯이 안 읽히는 부트루프**가 된다.
+그래서 NES/GB/GBC는 지금 retro-core(nofrendo, gnuboy)로 돌려놨다. 자세한 것과
+제대로 고치는 법은 `docs/APP_PARTITION_CEILING.md` 마지막 절.
+
 ### 실측 (전부 실기, `us/frame`)
 
-| 기종 | 결과 |
-|---|---|
-| GBA | **12,342** — 60fps, 여유 38% (아침엔 29,294) |
-| 메가드라이브 | **12,556** — 57fps |
-| Atari 2600 | 56.7fps / 6,503 us — 2026-08-04 재확인 |
-| SNES (sm) | **33,101 us** — 30.2fps |
-| SNES (snes9x) | 35,014 us — 27.6fps |
-| NGPC | 33fps — ⚠️ 스윕 이전 값, 재측정 필요 |
-| Supervision | 33fps — ⚠️ 스윕 이전 값, 재측정 필요 |
+**2026-08-04 전 기종 스윕. 크래시 0, 부팅 실패 0.** 아래는 전부 부팅 배너와 롬 경로가
+확인된 행이다. 정렬은 `us/frame` 오름차순 = 빠른 순.
 
-⚠️ 표시한 둘은 188b679에서 손으로 잰 값이라 아마 맞지만, 그 뒤 스윕이 낸 확인 값은
-런처였다(위 경고 참조). 고친 스윕으로 다시 돌려 확정할 것.
+| 기종 | us/frame | fps | 앱 |
+|---|---|---|---|
+| NES | **2,689** | 57.4 | retro-core (nofrendo) |
+| 게임보이 | **2,982** | 57.9 | retro-core (gnuboy) |
+| Game & Watch | 3,250 | 122.7 | retro-core |
+| 게임보이 컬러 | 3,327 | 54.9 | retro-core |
+| 게임기어 | 3,952 | 55.4 | retro-core |
+| SG-1000 | 4,964 | 57.8 | retro-core |
+| Atari 2600 | 6,648 | 57.0 | retro-core |
+| PC Engine | 6,864 | 31.1 | retro-core |
+| 마스터 시스템 | 7,228 | 55.1 | retro-core |
+| Supervision | 7,244 | 32.8 | retro-core |
+| 콜레코비전 | 7,333 | 55.0 | retro-core |
+| 메가드라이브 | 12,575 | 57.6 | gwenesis |
+| GBA | 20,118 | 47.3 | gbsp |
+| NGPC | 26,948 | 36.7 | retro-core |
+| **SNES (sm)** | **32,986** | 30.3 | sm-go |
+| SNES (snes9x) | 34,943 | 27.6 | retro-core |
+| MSX | 계측 없음 | 49.4 | fmsx |
+
+롬/BIOS가 카드에 없어 못 잰 기종: `a78`, `poke`, `wsc`, `vb`, `videopac`, `zxs`,
+`gamecom`(BIOS), `segacd`(BIOS), `cpc`, `tama`.
+
+**이전 기록과 다른 세 줄, 전부 확인했다:**
+
+- **GBA 20,118 (이전 12,342).** 회귀 아니다 — `jit_enabled`는 여전히 false다
+  (`gbsp/main/main.c:36`). 스윕은 `/sd/roms/gba/gba.gba`를 집고 12,342는 다른
+  게임에서 잰 값이다. **롬이 다르면 비교하지 말 것.**
+- **PC Engine 31.1fps (2026-08-02엔 58-60).** BUSY가 21%뿐이라 CPU 한계가 아니다.
+  틱 레이트 쪽으로 보이고, 아직 안 팠다.
+- **MSX는 숫자가 없다.** fmsx가 `ShowVideo()`에서 `rg_system_tick(0)`을 매 프레임
+  더 부르고 `Keyboard()`가 곧바로 `FrameStartTime`을 리셋해서, 프레임의 작업이 아니라
+  인접한 두 호출 사이의 빈 구간을 잰다. 스윕은 이제 0을 결과로 찍지 않고 "계측 없음"이라
+  적는다. 고치려면 fmsx의 루프를 봐야 한다.
 
 **GBA가 오늘 사정권에 들어왔고, 원인은 에뮬레이터가 아니었다.** `jit_enabled`가 true로
 출하돼 있었고 주석이 스스로 "Enable JIT, but all instructions use interpreter"라고 적고

@@ -156,7 +156,15 @@ def sweep(system):
         return "NO FRAMES", log
     busy = sum(int(b) for b, _ in rows) / len(rows)
     fps = sum(int(f) for _, f in rows) / len(rows)
-    us = busy * 10000 / fps if fps else 0
+    if busy < 1:
+        # 0 us/frame is not a fast core, it is a core that is not reporting. fmsx
+        # calls rg_system_tick(0) from ShowVideo() every frame AND resets
+        # FrameStartTime in Keyboard() immediately after, so the interval it
+        # times is the gap between two adjacent calls rather than the frame's
+        # work. Printing "0 us/frame" for that would be the same class of lie
+        # this harness was rewritten to stop telling.
+        return f"{fps:5.1f} fps   NO TIMING (core reports BUSY {busy:.1f}%)", log
+    us = busy * 10000 / fps
     return f"{fps:5.1f} fps   BUSY {busy:4.1f}%   {us:6.0f} us/frame", log
 
 
