@@ -1,0 +1,24 @@
+# nofrendo's state goes to PSRAM.
+#
+# Applied late, and the delay is the point: retro-core was carrying 519KB of
+# internal RAM, of which snes9x alone held 120KB and gamecom -- which cannot run
+# at all, it has no BIOS on the card -- held 82KB. Only one system runs per boot,
+# so all of that was resident for nothing and the internal heap was down to
+# ~120KB free out of a 202KB pool. That is what makes fonts, themes and UI
+# buffers feel impossible on a chip with 768KB of SRAM.
+#
+# Safe to do here because placement was measured, not assumed: moving the SNES's
+# 128KB of guest WRAM from PSRAM to internal RAM in sm-go moved the frame time
+# by 0.3%, inside the noise. The L2 cache is 128KB with 64-byte lines, so a hot
+# working set is served from cache wherever it nominally lives. The DRAM/PSRAM
+# gap that dominates the STM32H7 reference port barely exists on this one.
+[scheme:nofrendo_extram]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+    legacy_bss -> extern_ram
+
+[mapping:nofrendo_bss]
+archive: libnofrendo.a
+entries:
+    * (nofrendo_extram)

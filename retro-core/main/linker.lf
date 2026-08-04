@@ -1,23 +1,56 @@
-# main_zxs.c's `static zx_t zx` (the whole ZX Spectrum machine -- 48K RAM,
-# ROM, AY/beeper/kbd state) is ~325KB, declared as a translation-unit static in
-# the shared "main" component rather than in zxs's own component library. It
-# can't be handled by retro-core/components/zxs/linker.lf, which only reaches
-# libzxs.a -- this file lives in libmain.a alongside every other folded core's
-# main_<x>.c, and by the time zxs was the third core folded in one sitting,
-# that struct alone was enough to fail the link with esp-idf's "discards
-# section" (BRINGUP 0.3-2).
+# Every folded system's main_<x>.c statics go to PSRAM.
 #
-# Scoped to main_zxs.c.obj specifically, not the whole archive: the other
-# main_<x>.c files' statics (vidBuf, lookup tables, ...) already fit internal
-# RAM on their own, and moving them too would only add PSRAM latency they don't
-# need.
+# This started as one entry for main_zxs.c, whose `static zx_t zx` (the whole ZX
+# Spectrum machine -- 48K RAM, ROM, AY/beeper/kbd state) is ~325KB and failed the
+# link outright with esp-idf's "discards section" (BRINGUP 0.3-2). It was scoped
+# to that one object on the reasoning that the other main_<x>.c statics "already
+# fit internal RAM on their own, and moving them too would only add PSRAM latency
+# they don't need."
+#
+# Both halves of that turned out to be wrong, and it is worth writing down which.
+#
+# "They fit" is not the test -- the same mistake the core fragments made. Fitting
+# says nothing about what else needed the space. main_a26.cpp's `vidBuf` is 65,536
+# bytes of internal RAM held for the whole session so that Atari 2600 can have it
+# for the fraction of sessions that run Atari 2600. It is resident while Game Boy
+# plays. Only one system runs per boot; none of this has to be there at once, and
+# retro-core's internal heap was down to ~120KB free out of a 202KB pool, which is
+# what makes fonts, themes and UI buffers feel impossible on a chip with 768KB of
+# SRAM.
+#
+# "PSRAM latency they don't need" was an assumption, and it was measured on 2026-08-04
+# and did not survive: moving the SNES's 128KB of guest WRAM from PSRAM into
+# internal RAM in sm-go changed the frame time by 0.3%, inside the noise. The L2
+# cache is 128KB with 64-byte lines, so a hot working set is served out of cache
+# wherever it nominally lives. The DRAM/PSRAM gap that dominates the STM32H7
+# reference port -- which has no such cache, and overlays its cores at one address
+# because it must -- barely exists on this chip.
+#
+# main.c itself is deliberately absent: it is the dispatch, it is tiny, and it runs
+# before anything else is up.
 [scheme:main_extram]
 entries:
     bss -> extern_ram
     common -> extern_ram
     legacy_bss -> extern_ram
 
-[mapping:main_zxs_bss]
+[mapping:main_systems_bss]
 archive: libmain.a
 entries:
+    main_a26 (main_extram)
+    main_a78 (main_extram)
+    main_gamecom (main_extram)
+    main_gbc (main_extram)
+    main_gw (main_extram)
+    main_lynx (main_extram)
+    main_nes (main_extram)
+    main_ngp (main_extram)
+    main_pce (main_extram)
+    main_poke (main_extram)
+    main_sms (main_extram)
+    main_snes (main_extram)
+    main_supervision (main_extram)
+    main_vb (main_extram)
+    main_videopac (main_extram)
+    main_wsc (main_extram)
     main_zxs (main_extram)

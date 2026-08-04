@@ -342,6 +342,21 @@ void app_main(void)
     updates[1] = rg_surface_create(SNES_W, SNES_H, RG_PIXEL_565_LE, MEM_FAST);
     currentUpdate = updates[0];
 
+    /* WRAM stays in PSRAM, and that is a measurement rather than a default.
+     *
+     * The reference port spends its scarce internal RAM here (main_snes.c: "WRAM
+     * lives in the overlay BSS", out of a 120KB AHB pool), so moving our 128KB
+     * in looked like free speed -- this app has ~492KB of internal RAM free. It
+     * is not: 32,872 us/frame internal against 32,986 in PSRAM, which is 0.3%
+     * and inside the noise.
+     *
+     * The reason is the L2 cache. It is 128KB with 64-byte lines, so a hot 128KB
+     * region is served out of cache wherever it nominally lives, and the DRAM/
+     * PSRAM distinction that dominates the STM32H7 port barely exists here.
+     *
+     * Worth keeping because it generalises: on this chip, placement is not the
+     * lever for a working set this size. Do not spend internal RAM on speed
+     * without measuring -- it is the scarcest thing retro-core has. */
     snes_wram = rg_alloc(SNES_WRAM_SIZE, MEM_SLOW);
     sampleBuf = rg_alloc(SNES_MAX_SAMPLES * 2 * sizeof(int16_t), MEM_SLOW);
     if (!snes_wram || !sampleBuf)

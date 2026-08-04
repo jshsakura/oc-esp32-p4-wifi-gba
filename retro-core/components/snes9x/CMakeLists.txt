@@ -2,6 +2,7 @@ set(COMPONENT_SRCDIRS "src")
 set(COMPONENT_ADD_INCLUDEDIRS "." "src")
 set(COMPONENT_REQUIRES "retro-go")
 set(COMPONENT_PRIV_REQUIRES "esp_driver_ppa")
+set(COMPONENT_ADD_LDFRAGMENTS "linker.lf")
 register_component()
 rg_setup_compile_options(
     -Wno-unused-function
