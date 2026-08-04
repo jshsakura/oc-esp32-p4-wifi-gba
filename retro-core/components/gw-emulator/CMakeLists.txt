@@ -1,5 +1,6 @@
 set(COMPONENT_SRCDIRS "src src/cpus src/gw_sys")
 set(COMPONENT_ADD_INCLUDEDIRS "src src/cpus src/gw_sys")
 set(COMPONENT_REQUIRES "retro-go")
+set(COMPONENT_ADD_LDFRAGMENTS "linker.lf")
 register_component()
 rg_setup_compile_options(-O2)

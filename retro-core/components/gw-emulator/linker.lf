@@ -1,0 +1,20 @@
+# gw-emulator's state goes to PSRAM.
+#
+# Another pre-fold core that never got a fragment. Game & Watch ran at 121-124
+# fps on this board on 2026-08-02; after the fold it aborts in gw_romloader.c:340
+# -- an assert(false) taken when gw_romloader_rom2ram() rejects the image. The
+# card and the .gw files did not change, so what the loader is reading did.
+#
+# That loader works almost entirely through file-scope state (GW_ROM, gw_head and
+# the pointers derived from it, gw_keyboard among them), which is precisely the
+# state a fragment moves out of the way.
+[scheme:gw_emulator_extram]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+    legacy_bss -> extern_ram
+
+[mapping:gw_emulator_bss]
+archive: libgw-emulator.a
+entries:
+    * (gw_emulator_extram)

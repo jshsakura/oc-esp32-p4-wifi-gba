@@ -43,23 +43,33 @@ IDF_PY = os.path.expanduser("~/.espressif/python_env/idf5.5_py3.14_env/bin/pytho
 # meant to test. Ten of seventeen rows in one run were the LAUNCHER's menu.
 IDF_PATH = os.getenv("IDF_PATH") or os.path.expanduser("~/esp/esp-idf")
 
-# system -> (app, partition offset[, rom dir]). The offsets come from the packed
-# image's table; rerun `rg_tool.py build-img` and re-read them if the app set
-# changes. The ROM directory defaults to the system name, which is also what sets
-# app.configNs -- they are the same string by convention. `sm` is the exception:
-# it is a second SNES core, so it reads the same /sd/roms/snes the first one does
-# and the two are directly comparable.
+# system -> (app, partition offset[, rom dir[, filename match]]). The offsets come
+# from the packed image's table; rerun `rg_tool.py build-img` and re-read them if
+# the app set changes. The ROM directory defaults to the system name, which is
+# also what sets app.configNs -- they are the same string by convention. `sm` is
+# the exception: it is a second SNES core, so it reads the same /sd/roms/snes the
+# first one does and the two are directly comparable.
+#
+# The match defaults to "." (take the first file). Give it a real substring when
+# a directory holds something the core cannot open: /sd/roms/gw sorts gw.mgw
+# first, the launcher registers Game & Watch for the "gw" extension only, and
+# handing the core a format it never accepts made it assert in gw_romloader --
+# which reads as "Game & Watch is broken" rather than "that is not a ROM".
 SYSTEMS = {
-    "nes":         ("fceumm-go",   0x1030000),
+    # nes/gb/gbc run on retro-core (nofrendo, gnuboy). fceumm-go and tgbdual-go
+    # are the better cores and they build, but their partitions sit above 16MB
+    # and this bootloader cannot boot from there -- see applications.c and
+    # docs/APP_PARTITION_CEILING.md. Sweeping them only ever measures a boot loop.
+    "nes":         ("retro-core", 0x110000),
     "snes":        ("retro-core", 0x110000),
-    "gb":          ("tgbdual-go",  0x1230000),
-    "gbc":         ("tgbdual-go",  0x1230000),
+    "gb":          ("retro-core", 0x110000),
+    "gbc":         ("retro-core", 0x110000),
     "sms":         ("retro-core", 0x110000),
     "gg":          ("retro-core", 0x110000),
     "sg1":         ("retro-core", 0x110000),
     "col":         ("retro-core", 0x110000),
     "pce":         ("retro-core", 0x110000),
-    "gw":          ("retro-core", 0x110000),
+    "gw":          ("retro-core", 0x110000, "gw", ".gw"),
     "a26":         ("retro-core", 0x110000),
     "a78":         ("retro-core", 0x110000),
     "ngp":         ("retro-core", 0x110000),
@@ -81,15 +91,22 @@ SYSTEMS = {
 
 
 def sh(cmd, **kw):
-    return subprocess.run(cmd, shell=True, cwd=REPO, capture_output=True, text=True, **kw)
+    # errors="replace" is load-bearing. A serial line carries whatever the board
+    # emits, including raw bytes from a half-initialised UART or a core printing
+    # binary, and strict UTF-8 decoding turns one stray 0xf0 into a traceback
+    # that kills the whole sweep on system 1 of 27. Decoding is for reading logs,
+    # not for validating them: nothing downstream cares about the odd U+FFFD.
+    return subprocess.run(cmd, shell=True, cwd=REPO, capture_output=True,
+                          text=True, errors="replace", **kw)
 
 
 def sweep(system):
     entry = SYSTEMS[system]
     app, offset = entry[0], entry[1]
     rom_dir = entry[2] if len(entry) > 2 else system
+    match = entry[3] if len(entry) > 3 else "."
 
-    env = f'RG_BENCH_ROM_DIR={rom_dir} RG_BENCH_ROM_MATCH=.'
+    env = f'RG_BENCH_ROM_DIR={rom_dir} RG_BENCH_ROM_MATCH={match}'
     build = sh(f'bash -lc "source ~/esp/esp-idf/export.sh >/dev/null 2>&1 && '
                f'{env} python3 rg_tool.py build {app} --target {TARGET}"')
     if "All done" not in build.stdout:
@@ -153,10 +170,16 @@ def main():
             print(f"{s:<12} unknown system", flush=True)
             continue
         t0 = time.time()
-        verdict, log = sweep(s)
+        # A sweep is a long unattended run over 27 systems on real hardware, so
+        # one system going wrong must cost one row, not the other 26. Whatever
+        # went wrong is written into the row and the sweep carries on.
+        try:
+            verdict, log = sweep(s)
+        except Exception as exc:                     # noqa: BLE001
+            verdict, log = f"SWEEP ERROR: {type(exc).__name__}: {exc}", ""
         results[s] = verdict
         if log:
-            open(f"{outdir}/{s}.log", "w").write(log)
+            open(f"{outdir}/{s}.log", "w", errors="replace").write(log)
         print(f"{s:<12} {verdict}   ({time.time()-t0:.0f}s)", flush=True)
 
     print("\n=== sweep ===")

@@ -722,13 +722,28 @@ static void application(const char *desc, const char *name, const char *exts, co
 
 void applications_init(void)
 {
-    application("Nintendo Entertainment System", "nes", "nes fc fds nsf zip", "fceumm-go", 16);
+    // NES, Game Boy and Game Boy Color point at retro-core, NOT at fceumm-go and
+    // tgbdual-go, even though those are the better cores and are built and
+    // flashed. Their partitions start at 0x1030000 and 0x1230000 -- above 16MB --
+    // and this bootloader cannot boot from there: a 32MB flash needs 4-byte
+    // addressing past 16MB, and the second-stage bootloader does not use it.
+    // Pointing otadata at either one does not fail politely, it wedges the MSPI
+    // and then EVERY slot reads back as "invalid magic byte", including the
+    // launcher's own, so the board sits in a boot loop (measured: 131 rounds in
+    // one 26s capture). The same tgbdual-go binary flashed to a partition below
+    // 16MB boots and runs at ~200 fps, which is what pins it to the address.
+    //
+    // So these three systems were dead on the device, and the bench harness had
+    // been reporting them as working. retro-core's nofrendo (57 fps) and gnuboy
+    // (58 fps) are measured and real. Restoring the better cores is a partition
+    // layout problem, not a core problem -- see docs/APP_PARTITION_CEILING.md.
+    application("Nintendo Entertainment System", "nes", "nes fc zip", "retro-core", 0);
     application("Super Nintendo", "snes", "smc sfc zip", "retro-core", 0);
     // The same system on the `sm` core, alongside snes9x rather than replacing it
     // until there is a device measurement to choose on. See sm-go/main/main.c.
     application("Super Nintendo (sm)", "sm", "smc sfc zip", "sm-go", 0);
-    application("Nintendo Gameboy", "gb", "gb gbc zip", "tgbdual-go", 0);
-    application("Nintendo Gameboy Color", "gbc", "gbc gb zip", "tgbdual-go", 0);
+    application("Nintendo Gameboy", "gb", "gb gbc zip", "retro-core", 0);
+    application("Nintendo Gameboy Color", "gbc", "gbc gb zip", "retro-core", 0);
     application("Nintendo Gameboy Advance", "gba", "gba zip", "gbsp", 0);
     application("Nintendo Game & Watch", "gw", "gw", "retro-core", 0);
     application("Sega SG-1000", "sg1", "sms sg sg1", "retro-core", 0);

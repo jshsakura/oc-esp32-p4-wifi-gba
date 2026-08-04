@@ -19,6 +19,13 @@ void app_main(void)
         sms_main();
     else if (strcmp(app->configNs, "col") == 0)
         sms_main();
+    /* SG-1000 is smsplus too, and main_sms.c already picks console 5 off the
+     * .sg extension -- only this line was missing. The launcher has offered the
+     * tab all along (applications.c: "Sega SG-1000" -> retro-core), so choosing
+     * it fell through to the exit below and bounced straight back to the
+     * launcher. An unknown configNs leaves silently; it does not warn. */
+    else if (strcmp(app->configNs, "sg1") == 0)
+        sms_main();
     else if (strcmp(app->configNs, "gw") == 0)
         gw_main();
     else if (strcmp(app->configNs, "snes") == 0)
@@ -48,7 +55,19 @@ void app_main(void)
         lynx_main();
 #endif
     else
+    {
+        /* Say so. This fallthrough is why sg1 was invisible: a namespace nobody
+         * dispatches lands in the launcher, which looks like a working boot from
+         * the outside -- it draws, it runs at a few hundred fps, and the only
+         * tell is a tab that bounces back when you pick it. It is also what the
+         * bench harness measured for ten systems before it learned to check the
+         * boot banner. Twenty systems dispatch from one binary here; a typo in a
+         * namespace should not be silent. */
+        RG_LOGW("No core for configNs='%s' -- falling back to the launcher. "
+                "If this is a system, it is missing from the dispatch above.",
+                app->configNs);
         launcher_main();
+    }
 
     RG_PANIC("Never reached");
 }

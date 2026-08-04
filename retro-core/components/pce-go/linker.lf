@@ -1,0 +1,19 @@
+# pce-go's state goes to PSRAM.
+#
+# PC Engine took a stack protection fault after the fold. Stack is a separate
+# budget from the heap and a fragment does not move it -- but this core is one of
+# the pre-fold holdouts still keeping its statics in internal RAM, and with
+# internal .bss at 313KB against ~59KB of internal heap there is no room to be
+# generous with either. Moving the statics out is the rule regardless of which
+# budget the crash lands in; if the fault survives this, it is genuinely the
+# stack and CONFIG_ESP_MAIN_TASK_STACK_SIZE is the dial, not this file.
+[scheme:pce_go_extram]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+    legacy_bss -> extern_ram
+
+[mapping:pce_go_bss]
+archive: libpce-go.a
+entries:
+    * (pce_go_extram)

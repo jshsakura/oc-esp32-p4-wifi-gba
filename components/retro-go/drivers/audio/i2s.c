@@ -160,7 +160,17 @@ static bool driver_submit(const rg_audio_frame_t *frames, size_t count)
     // ring has room. Three waits per frame instead of one cost about 0.9ms of the 16.6ms
     // budget, which is most of the 5% by which the codec was being underfed, and an underfed
     // codec repeats its last descriptor: the periodic rattle heard on the speaker.
-    rg_audio_frame_t buffer[1024];
+    // static, not a local: at 1024 frames of 4 bytes this is 4KB, and it was
+    // 4KB taken from the stack of whichever core happens to be submitting audio.
+    // PC Engine died here with a stack protection fault -- the fault address is
+    // in driver_submit, but the cost is charged to every core that calls it, and
+    // folded cores now run on app_main's frame rather than at the base of their
+    // own task. Raising CONFIG_ESP_MAIN_TASK_STACK_SIZE again would have paid
+    // for this buffer once per task instead of once.
+    //
+    // Safe because there is exactly one call site (rg_audio.c:146) and it holds
+    // audio.lock across the call, so two submissions cannot overlap here.
+    static rg_audio_frame_t buffer[1024];
     size_t written = 0;
     size_t pos = 0;
 

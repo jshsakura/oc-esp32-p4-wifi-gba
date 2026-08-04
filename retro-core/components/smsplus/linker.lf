@@ -1,0 +1,25 @@
+# smsplus's state goes to PSRAM.
+#
+# This core predates the fold, so it never got a fragment -- and it is four of
+# retro-core's systems (Master System, Game Gear, Colecovision, SG-1000), all of
+# which aborted in heap_caps_free with "free() target pointer is outside heap
+# areas". Decoded, the path was sound_init -> sound_shutdown (sound.c:62 clears
+# before it builds) -> free() at sound.c:143, on the `snd` global: snd.enabled
+# was set and snd.stream[] held pointers that were never malloc'd. Those fields
+# are zero at reset, so something else was writing them.
+#
+# Same failure as potator, same fix, and the same lesson underneath it: age is
+# not evidence of safety. The cores that shipped before the fold are exactly the
+# ones still holding internal RAM, and internal .bss is now 313KB against ~59KB
+# of internal heap left. Only one system runs per boot, so none of this has to be
+# resident at once.
+[scheme:smsplus_extram]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+    legacy_bss -> extern_ram
+
+[mapping:smsplus_bss]
+archive: libsmsplus.a
+entries:
+    * (smsplus_extram)
