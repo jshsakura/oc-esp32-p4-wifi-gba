@@ -12,7 +12,7 @@ static rg_app_t *app;
 static int JoyState, LastKey, InMenu, InKeyboard;
 static int KeyboardCol, KeyboardRow, KeyboardKey;
 static int64_t KeyboardDebounce = 0;
-static int FrameStartTime;
+static int64_t FrameStartTime = 0;
 static int KeyboardEmulation, CropPicture;
 static char *PendingLoadSTA = NULL;
 
@@ -258,9 +258,12 @@ unsigned int Joystick(void)
 
 void Keyboard(void)
 {
-    // Keyboard() is a convenient place to do our vsync stuff :)
-    rg_system_tick(rg_system_timer() - FrameStartTime);
-    FrameStartTime = rg_system_timer();
+    int64_t now = rg_system_timer();
+    if (FrameStartTime > 0)
+        rg_system_tick(now - FrameStartTime);
+    else
+        rg_system_tick(0);
+    FrameStartTime = now;
 
     if (PendingLoadSTA)
     {
@@ -278,7 +281,6 @@ unsigned int Mouse(byte N)
 int ShowVideo(void)
 {
     SubmitFrame();
-    rg_system_tick(0);
     return 1;
 }
 
@@ -334,10 +336,8 @@ unsigned int GetFreeAudio(void)
 
 void PlayAllSound(int uSec)
 {
-    int64_t start = rg_system_timer();
     unsigned int samples = 2 * uSec * AUDIO_SAMPLE_RATE / 1000000;
     rg_task_send(audioQueue, &(rg_task_msg_t){.dataInt = samples});
-    FrameStartTime += rg_system_timer() - start;
 }
 
 unsigned int WriteAudio(sample *Data, unsigned int Length)
