@@ -149,3 +149,58 @@ OTA 슬롯이 16개라는 것만 보고 있었는데, **더 낮은 곳에 훨씬
 `tools/sweep_systems.py`에 다시 옮겨 적을 것.
 
 **새 앱을 추가할 때는 슬롯 수가 아니라 `0x1000000`을 먼저 볼 것.**
+
+---
+
+## 코어를 SD에서 런타임 로딩하는 길 (2026-08-04 조사)
+
+리눅스 기기들이 하듯 코어를 `.so`로 SD에 두고 실행 직전에 불러 쓰는 방식이 **이 칩에서
+가능하다.** 그러면 OTA 슬롯 16개 제한도, 16MB 부팅 한계도, 스무 코어 정적 동시 상주도
+한꺼번에 없어진다. 복사 비용은 논점이 아니다 — 1MB면 0.1~0.3초다.
+
+**`espressif/elf_loader`가 공식으로 있다.** ESP32-P4를 지원 목록에 명시하고 "PSRAM에서
+ELF 실행"을 지원한다고 적는다. API는 `dlopen()`/`dlsym()`이고 파일 경로를 받는다(예제
+경로가 `/riscv/lib.so`다). 호스트 심볼은 `tool/symbols.py`가 `esp_all_symbol.c`를
+생성해 잇는다 — 재배치·심볼 바인딩을 손으로 만들 필요가 없다.
+
+    idf.py add-dependency "espressif/elf_loader=*"
+
+### 실기에서 부딪힌 것 둘, 둘 다 기록해 둔다
+
+**1. 링커 프래그먼트로 `.text`를 PSRAM에 보내는 건 안 된다.** neopop에 `text ->
+extern_ram`을 넣으면 링크는 통과하고 172KB가 `0x480xxxxx`에 배치되지만, 첫 호출에서
+`Illegal instruction`으로 죽는다(MEPC `0x480a61c6`). **프래그먼트는 주소를 배정할 뿐,
+거기에 무언가를 적재해주지 않는다.** 초기화 안 된 PSRAM을 실행한 것이다. 코드를 PSRAM에
+올리는 건 부팅 시점의 일이다.
+
+**2. `CONFIG_SPIRAM_XIP_FROM_PSRAM`은 이 트리에서 링크되지 않는다.** P4에서 지원되는
+옵션이 맞고(`SPIRAM_BOOT_INIT` 의존, FETCH_INSTRUCTIONS/RODATA/FLASH_LOAD_TO_PSRAM을
+select) 켜지긴 하는데, libefuse의 `.sdata.*`가 `--enable-non-contiguous-regions
+discards section`으로 떨어진다. 아직 안 팠다.
+
+⚠️ 되돌릴 때 **생성된 `retro-core/sdkconfig`를 지워야 한다.** 타깃 sdkconfig에서 옵션을
+빼도 생성본이 그대로 들고 있어서 빌드가 계속 깨진다. rg_tool의 스탬프 해시도 이 경우를
+못 잡았다.
+
+### 그런데 성능은 공짜가 아닐 수 있다 — 근거 있는 우려
+
+P4 Kconfig 도움말이 직접 적고 있다:
+
+> *"Because P4 flash and PSRAM are using **two separate SPI buses**, moving flash content
+> to PSRAM will actually **increase the load of the PSRAM MSPI bus**... We suggest doing
+> performance profiling to determine if enabling this option."*
+
+지금 구조는 **명령어는 플래시 버스, 데이터는 PSRAM 버스**로 병렬이다. 코어를 PSRAM에서
+실행하면 둘이 한 버스로 몰린다. 일반 앱이라면 대개 이득이지만 **에뮬레이터는 데이터가
+무겁다** — 롬, WRAM, VRAM, 프레임버퍼가 전부 PSRAM이다. 여기서 경합이 생기면 그대로
+프레임 시간이다.
+
+참고로 데이터 배치는 이미 무의미함이 확인됐다(L2 128KB가 흡수, WRAM 실험 0.3%). 하지만
+**명령어 페치는 별개 문제이고 아직 숫자가 없다.**
+
+### 다음에 할 일
+
+`elf_loader`로 작은 코어 하나를 `.so`로 만들어 SD에서 로드해 돌리고, 정적 링크판과
+`us/frame` A/B. 검출기로는 NGPC가 좋다 — BUSY 99%, 26,681 us/frame으로 완전히 CPU
+병목이라 페치 페널티가 있으면 희석 없이 드러난다. **그 숫자 하나가 이 방향의 성패를
+가른다.**

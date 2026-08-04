@@ -12,6 +12,12 @@
 # lives in esp_wifi's fragment, and this app builds with networking off, so the
 # name resolves to nothing -- silently, leaving the link failing at exactly the
 # same byte count as before.
+# Do NOT add `text -> extern_ram` here. It links, it places 172KB of .text at
+# 0x480xxxxx, and the board dies with an illegal instruction at the first call
+# into this core -- a linker fragment assigns ADDRESSES, it does not arrange for
+# anything to be loaded there, so the CPU executes uninitialised PSRAM. Getting
+# code into PSRAM is a boot-time job (CONFIG_SPIRAM_XIP_FROM_PSRAM), not a
+# placement one. Tried 2026-08-04 while pricing instruction fetch from PSRAM.
 [scheme:neopop_extram]
 entries:
     bss -> extern_ram
