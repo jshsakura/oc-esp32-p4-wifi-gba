@@ -150,6 +150,51 @@ OTA 슬롯이 16개라는 것만 보고 있었는데, **더 낮은 곳에 훨씬
 
 **새 앱을 추가할 때는 슬롯 수가 아니라 `0x1000000`을 먼저 볼 것.**
 
+### 그 옵션은 있고, 이 보드에서는 못 쓴다 (2026-08-04 실기)
+
+**16MB 천장을 푸는 Kconfig 옵션이 존재한다:**
+
+    CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+    CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH=y
+
+그리고 **좁게 시험했을 때는 동작했다.** 부트로더를 다시 굽고 나니 `tgbdual-go`
+(`0x1230000`)가 부팅해 ~200fps, `fceumm-go`(`0x1030000`)가 부팅해 ~40fps로 돌았다.
+한 번도 부팅한 적 없던 파티션들이다.
+
+이게 왜 하드웨어 한계처럼 보였는지도 알아냈다 — `BOOTLOADER_FLASH_32BIT_ADDR`과
+`*_NEEDS_32BIT_ADDR_QUAD_FLASH`는 **"Invisible for users"** 헬퍼라 32MB 플래시 크기에서
+자동으로 켜진다. 그래서 설정에서 32비트 주소 관련이 전부 켜진 것처럼 보이는데, 실제로
+캐시 접근을 켜는 옵션만 default n으로 experimental 게이트 뒤에 있었다.
+
+**그런데 전체 빌드에 적용하니 기기가 죽었다.** 공유 타깃 sdkconfig에 넣고 전 기종
+스윕을 돌리자 **모든 앱이 부팅 실패**했다. 부트로더가 `CHIP_LP_WDT_RESET`으로 부트루프에
+빠지고, 새 경고가 떴다:
+
+    W flash HPM: HPM mode is optional feature that depends on flash model
+    W flash HPM: HPM mode with DC adjustment is disabled
+
+experimental 게이트를 열면 플래시 High Performance Mode 선택이 `AUTO` 기본값으로
+살아나고, 그건 *"80MHz 초과 시 경고와 함께 자동 활성화"* 된다. **그런데
+`CONFIG_SPI_FLASH_HPM_DIS=y`로 명시적으로 꺼도 워치독 리셋은 그대로였다.** 원인은
+HPM이 아니거나, HPM만이 아니다.
+
+Espressif가 이 옵션에 붙인 경고가 그대로다 — *"experimental, 모든 플래시 칩에서 안정적
+이지 않다"*. 이 보드의 칩은 GigaDevice `c8:4019`이고, 좁은 시험은 통과하고 넓은 적용은
+통과하지 못한다.
+
+**되돌렸다.** 런처의 NES/GB/GBC는 다시 retro-core(nofrendo 57fps, gnuboy 58/55)를 쓴다.
+구 부트로더는 `scratchpad/bootloader_backup.bin`(md5 `233f8530...`)에서 복구했다.
+
+**다음에 이걸 다시 열려면 필요한 것:**
+
+- 왜 좁은 시험은 되고 넓은 적용은 안 되는가. 부트로더 바이너리는 두 경우 모두
+  같은 옵션으로 빌드했는데 결과가 달랐다 — 차이는 **앱들이 같은 설정으로 다시 빌드된
+  것**뿐이다. 앱 쪽 무엇이 부트로더를 죽이는지가 미지수다.
+- `esptool`의 `write_flash`에 `--flash_mode`/`--flash_size`/`--flash_freq`를 주는 경우와
+  안 주는 경우(스윕이 안 준다) 이미지 헤더가 달라지는지.
+- 실패는 **복구 가능하다**. 부트로더 백업을 되굽고 앱을 원래 설정으로 다시 구우면 돌아온다.
+  다만 그 사이 기기는 아무것도 못 한다.
+
 ---
 
 ## 코어를 SD에서 런타임 로딩하는 길 (2026-08-04 조사)

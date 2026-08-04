@@ -722,33 +722,30 @@ static void application(const char *desc, const char *name, const char *exts, co
 
 void applications_init(void)
 {
-    // Game Boy and Game Boy Color are back on tgbdual-go, and NES is NOT back on
-    // fceumm-go -- deliberately, and the reason is now a measurement rather than
-    // a wall.
+    // NES, Game Boy and Game Boy Color point at retro-core, NOT at fceumm-go and
+    // tgbdual-go, because those two live above 16MB (0x1030000, 0x1230000) and
+    // this bootloader cannot boot from there. It does not fail politely either:
+    // pointing otadata at one wedges the MSPI and every slot afterwards reads
+    // back "invalid magic byte", the launcher included, so the board boot-loops.
     //
-    // All three used to be forced onto retro-core because fceumm-go (0x1030000)
-    // and tgbdual-go (0x1230000) live above 16MB and the bootloader could not
-    // boot from there. That is fixed: BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH in
-    // the target sdkconfig, and both partitions boot.
+    // The Kconfig option that lifts that ceiling exists and WORKS IN ISOLATION --
+    // BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH, behind IDF_EXPERIMENTAL_FEATURES.
+    // With it, both partitions booted and ran (NES 40 fps, Game Boy ~200 fps).
+    // But turning it on for the whole build watchdog-reset the bootloader in a
+    // loop and took every app down with it, and pinning SPI_FLASH_HPM_DIS did
+    // not save it. Espressif marks the option "can't use on all flash chips
+    // stable" and this board appears to be one of those chips. Reverted; the
+    // whole episode is written up in docs/APP_PARTITION_CEILING.md.
     //
-    // With the choice restored, the two systems go different ways:
-    //
-    //   Game Boy   tgbdual-go ~200 fps  against gnuboy's 58    -> tgbdual
-    //   NES        fceumm-go    40 fps, BUSY 100%
-    //              nofrendo     57 fps, BUSY 15%               -> nofrendo
-    //
-    // fceumm is the more accurate core and it is built, flashed and bootable --
-    // switching NES to it is one word here. But it does not hold 60 fps on this
-    // board and nofrendo does, with 85% of the frame to spare, so accuracy would
-    // be bought with frames. That trade belongs to whoever owns the product, not
-    // to whoever happened to unblock the partition.
+    // So this stays as-is until that is understood. retro-core's nofrendo
+    // (57 fps) and gnuboy (58 / 55) are measured and real.
     application("Nintendo Entertainment System", "nes", "nes fc zip", "retro-core", 0);
     application("Super Nintendo", "snes", "smc sfc zip", "retro-core", 0);
     // The same system on the `sm` core, alongside snes9x rather than replacing it
     // until there is a device measurement to choose on. See sm-go/main/main.c.
     application("Super Nintendo (sm)", "sm", "smc sfc zip", "sm-go", 0);
-    application("Nintendo Gameboy", "gb", "gb gbc zip", "tgbdual-go", 0);
-    application("Nintendo Gameboy Color", "gbc", "gbc gb zip", "tgbdual-go", 0);
+    application("Nintendo Gameboy", "gb", "gb gbc zip", "retro-core", 0);
+    application("Nintendo Gameboy Color", "gbc", "gbc gb zip", "retro-core", 0);
     application("Nintendo Gameboy Advance", "gba", "gba zip", "gbsp", 0);
     application("Nintendo Game & Watch", "gw", "gw", "retro-core", 0);
     application("Sega SG-1000", "sg1", "sms sg sg1", "retro-core", 0);
