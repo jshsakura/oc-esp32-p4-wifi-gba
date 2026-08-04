@@ -81,7 +81,7 @@
 | 게임기어 | 3,952 | 55.4 | retro-core |
 | SG-1000 | 4,964 | 57.8 | retro-core |
 | Atari 2600 | 6,648 | 57.0 | retro-core |
-| PC Engine | 6,864 | 31.1 | retro-core |
+| PC Engine | 6,864 | 59.0 | retro-core |
 | 마스터 시스템 | 7,228 | 55.1 | retro-core |
 | Supervision | 7,244 | 32.8 | retro-core |
 | 콜레코비전 | 7,333 | 55.0 | retro-core |
@@ -100,8 +100,12 @@
 - **GBA 20,118 (이전 12,342).** 회귀 아니다 — `jit_enabled`는 여전히 false다
   (`gbsp/main/main.c:36`). 스윕은 `/sd/roms/gba/gba.gba`를 집고 12,342는 다른
   게임에서 잰 값이다. **롬이 다르면 비교하지 말 것.**
-- **PC Engine 31.1fps (2026-08-02엔 58-60).** BUSY가 21%뿐이라 CPU 한계가 아니다.
-  틱 레이트 쪽으로 보이고, 아직 안 팠다.
+- **PC Engine 31.1fps는 측정 아티팩트였다 (틱 레이트 문제가 아님).** 부팅이 느린
+  기종은 캡처 앞부분에 BUSY:0%,FPS:0 샘플이 10개쯤 쌓이는데, sweep_systems.py가
+  첫 샘플 하나만 버려서 나머지가 평균에 섞여 fps를 절반으로 깎았다. 진짜는 ~59fps.
+  us/frame 열은 busy*10000/fps라 zero 샘플이 분모·분자를 같은 비율로 깎아 불변 —
+  항상 정확했고 PC Engine은 멀쩡했다. 수정: 앞쪽 연속 zero 런 전부 스킵,
+  유효 샘플 < 5면 "TOO FEW SAMPLES".
 - **MSX는 숫자가 없다.** fmsx가 `ShowVideo()`에서 `rg_system_tick(0)`을 매 프레임
   더 부르고 `Keyboard()`가 곧바로 `FrameStartTime`을 리셋해서, 프레임의 작업이 아니라
   인접한 두 호출 사이의 빈 구간을 잰다. 스윕은 이제 0을 결과로 찍지 않고 "계측 없음"이라

@@ -56,14 +56,17 @@ IDF_PATH = os.getenv("IDF_PATH") or os.path.expanduser("~/esp/esp-idf")
 # handing the core a format it never accepts made it assert in gw_romloader --
 # which reads as "Game & Watch is broken" rather than "that is not a ROM".
 SYSTEMS = {
-    # nes/gb/gbc run on retro-core (nofrendo, gnuboy). fceumm-go and tgbdual-go
-    # are the better cores and they build, but their partitions sit above 16MB
-    # and this bootloader cannot boot from there -- see applications.c and
-    # docs/APP_PARTITION_CEILING.md. Sweeping them only ever measures a boot loop.
-    "nes":         ("retro-core", 0x110000),
+    # nes/gb/gbc have their own cores (fceumm-go, tgbdual-go) whose partitions sit
+    # above 16MB. That booted nothing until the bootloader was given 32-bit flash
+    # address access -- CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH=y behind
+    # CONFIG_IDF_EXPERIMENTAL_FEATURES=y in the shared target sdkconfig. With it on
+    # (and the bootloader rebuilt), both come up. snes/sms/gg/sg1/col/pce/gw/a26/
+    # a78/ngp/supervision/poke/wsc/vb/videopac/zxs/gamecom stay on retro-core --
+    # one binary, many systems.
+    "nes":         ("fceumm-go",  0x1030000),
     "snes":        ("retro-core", 0x110000),
-    "gb":          ("retro-core", 0x110000),
-    "gbc":         ("retro-core", 0x110000),
+    "gb":          ("tgbdual-go", 0x1230000),
+    "gbc":         ("tgbdual-go", 0x1230000),
     "sms":         ("retro-core", 0x110000),
     "gg":          ("retro-core", 0x110000),
     "sg1":         ("retro-core", 0x110000),
@@ -151,9 +154,22 @@ def sweep(system):
     if "BENCH: nothing in" in log:
         return "NO ROM: nothing on the card", log
 
-    rows = re.findall(r"BUSY:(\d+)%, FPS:(\d+)", log)[1:]  # first sample is 0 0
-    if not rows:
-        return "NO FRAMES", log
+    rows = re.findall(r"BUSY:(\d+)%, FPS:(\d+)", log)
+    # The monitor task prints BUSY/FPS once a second, and from boot until the first
+    # emulated frame every one of those lines is BUSY:0%, FPS:0. A slow-booting core
+    # (PC Engine, ColecoVision) emits ten or more of those before emulation starts.
+    # The old code skipped exactly one ([1:]); the remaining boot zeros were averaged
+    # in with the real lines and dragged the rate down to half -- PC Engine read 31fps
+    # when every real line in its log was 58-60. Drop the whole leading run of genuine
+    # zero samples (BUSY 0 AND FPS 0). A zero that turns up mid-stream, after real
+    # frames, is a stall or a pause, not boot, so it stays in the average.
+    while rows and int(rows[0][0]) == 0 and int(rows[0][1]) == 0:
+        rows.pop(0)
+    # The other half of "don't print a number you don't have": if the capture caught
+    # almost no emulation (short capture, very slow boot, or it froze the instant it
+    # started), averaging two samples is not a measurement.
+    if len(rows) < 5:
+        return f"TOO FEW SAMPLES ({len(rows)} valid, need 5)", log
     busy = sum(int(b) for b, _ in rows) / len(rows)
     fps = sum(int(f) for _, f in rows) / len(rows)
     if busy < 1:
