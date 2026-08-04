@@ -31,7 +31,8 @@ static int64_t time_static(uint32_t *out)
 static int64_t time_module(uint32_t *out, int *err)
 {
     esp_elf_t elf;
-    char *argv[1] = {NULL};
+    uint32_t result = 0;
+    char *argv[1] = {(char *)&result};
 
     *err = esp_elf_init(&elf);
     if (*err != 0)
@@ -52,10 +53,16 @@ static int64_t time_module(uint32_t *out, int *err)
     RG_LOGW("ELFSPIKE: relocate took %lld us", reloc);
 
     int64_t t0 = rg_system_timer();
-    int rc = esp_elf_request(&elf, 0, 0, argv);
+    int rc = esp_elf_request(&elf, 0, 1, argv);
     int64_t dt = rg_system_timer() - t0;
+    if (rc != 0)
+    {
+        *err = rc;
+        esp_elf_deinit(&elf);
+        return -1;
+    }
 
-    *out = (uint32_t)rc;
+    *out = result;
     esp_elf_deinit(&elf);
     return dt;
 }
