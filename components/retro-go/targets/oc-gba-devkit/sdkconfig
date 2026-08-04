@@ -440,3 +440,30 @@ CONFIG_ESP_ERR_TO_NAME_LOOKUP=y
 # WiFi - Disabled by default (enable if needed)
 #
 CONFIG_ESP_WIFI_ENABLED=n
+
+# Boot from app partitions above 16MB.
+#
+# The flash is 32MB and the last two app partitions -- fceumm-go at 0x1030000 and
+# tgbdual-go at 0x1230000 -- sit past the 16MB line. Without this they cannot
+# boot AT ALL, and they do not fail politely: pointing otadata at either wedges
+# the MSPI and every slot afterwards reads back "invalid magic byte", the
+# launcher's own included, so the board boot-loops (131 rounds in one 26s
+# capture) while the flash contents verify byte-for-byte over esptool.
+#
+# That made NES, Game Boy and Game Boy Color dead on the device for as long as
+# they have existed here, and the bench harness reported them as working.
+#
+# The helper configs BOOTLOADER_FLASH_32BIT_ADDR and *_NEEDS_32BIT_ADDR_QUAD_FLASH
+# were already on -- they are invisible and auto-set from the 32MB flash size --
+# which is what made this look like a hardware ceiling. The option that actually
+# turns on cache access above 16MB is BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH, and
+# it is default n behind the experimental gate, the same gate that hides
+# SPIRAM_SPEED_200M on this chip.
+#
+# Espressif calls it experimental: "can't use on all flash chips stable". This
+# board's chip is GigaDevice c8:4019 and it works -- verified by booting both
+# partitions and by a full sweep. Re-verify if the flash part ever changes.
+#
+# Changing this means REFLASHING THE BOOTLOADER, not just an app.
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH=y

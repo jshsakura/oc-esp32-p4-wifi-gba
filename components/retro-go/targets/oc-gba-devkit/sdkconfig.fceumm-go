@@ -13,3 +13,10 @@
 
 CONFIG_ESP_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+# fceumm took a stack protection fault on its first boot from a partition above
+# 16MB -- not because of the address, but because this is a standalone app and
+# CONFIG_ESP_MAIN_TASK_STACK_SIZE is still the 8KB default here. retro-core
+# raised it to 16384 for the same reason (stella), and the audio path alone used
+# to take 4KB of whatever stack it was called on. Same budget, same fix.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
