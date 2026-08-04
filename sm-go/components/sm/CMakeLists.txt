@@ -40,6 +40,24 @@ register_component()
 rg_setup_compile_options(
     -O2
     -DPPU_RGB565
+    # SNES_SPIN_SKIP is deliberately NOT defined, and that is a measurement, not
+    # an oversight. Defining it arms the purity hooks in cpu.c's cpu_read and
+    # cpu_write -- the two hottest functions in the interpreter -- and on this
+    # board that costs more than the replay saves. Measured on device against
+    # /sd/roms/snes/snes.smc, A/B/A interleaved, us/frame:
+    #
+    #   not defined ................................. 32,986 / 33,043
+    #   defined, learner on (auto-gate deciding) .... 34,296 / 34,234
+    #   defined, learner gated off by DEFAULT=false . 34,296 / 34,358
+    #
+    # The last row is the informative one: gating the learner off recovers
+    # nothing, so the cost is the compiled-in `if (g_spin.phase)` on every memory
+    # access, not the learning. That is a per-access tax an in-order core pays in
+    # full, and no runtime gate can refund it.
+    #
+    # The wiring stays behind the ifdefs (main.c) so this can be retried -- the
+    # ledger measured 56.6% of SMW's opcodes inside spin loops on the reference
+    # device, so a different ROM may well repay it. Re-measure, do not assume.
     -Wno-unused-variable
     -Wno-unused-function
     -Wno-unused-but-set-variable

@@ -1,5 +1,5 @@
 /*
- * The three symbols this core expects its host to define.
+ * The symbols this core expects its host to define.
  *
  * They live in the component rather than in main/ on purpose: main depends on
  * sm, so the linker meets libmain.a before the archive that needs these and
@@ -43,4 +43,48 @@ void RtlApuWrite(uint32_t adr, uint8_t val)
     Snes *snes = sm_get_snes();
     if (snes)
         apu_cpuWrite(snes->apu, (uint16_t)(adr & 0xffff), val);
+}
+
+/* ---- the interpreter's two escape hatches ----------------------------------
+ *
+ * These went undefined the moment main started calling cpu_runOpcode(): until
+ * then nothing referenced cpu_doOpcode, so --gc-sections dropped the whole
+ * opcode body and the references with it. The build "succeeding" before was the
+ * linker discarding the emulator, not the emulator being complete.
+ *
+ * Both are the decompilation's way back into native code. BRK is how the
+ * reference hands an opcode to the rewritten game, and the RTS/RTL gate fires
+ * only when cpu->spBreakpoint has been armed, which only sm_cpu_infra.c does.
+ * With a plain ROM there is no native side to jump to, so both take the
+ * emulate-it-normally branch -- the same stubs the reference port's generic
+ * emulator uses (porting/snes/main_snes.c:67-68). */
+int CpuOpcodeHook(uint32_t addr)
+{
+    (void)addr;
+    return 0;   /* 0 = run the opcode as read */
+}
+
+bool HookedFunctionRts(int is_long)
+{
+    (void)is_long;
+    return false;   /* no hooked function to return from */
+}
+
+/* ---- the static recompiler, which is not built -----------------------------
+ *
+ * rc_dispatch.c is deliberately absent (see CMakeLists): the ledger closes rc as
+ * a dead road on the reference device -- 46 fps with spin-skip against rc's 44,
+ * and 3.5 via XIP. But cpu_runOpcode consults g_rc_active on every opcode
+ * regardless, so the flag and the table it guards still have to resolve.
+ *
+ * False here means the branch is never taken and the lookup is never reached,
+ * which is exactly the state the reference port leaves a non-SMW ROM in. */
+bool g_rc_active = false;
+void (**g_rc_fns)(struct Cpu *) = NULL;
+
+uint16_t rc_dispatch_lookup(uint8_t bank, uint16_t pc)
+{
+    (void)bank;
+    (void)pc;
+    return 0;
 }
