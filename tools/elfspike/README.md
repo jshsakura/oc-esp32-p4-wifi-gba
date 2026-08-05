@@ -1,6 +1,54 @@
-# elfspike — 코어를 런타임에 로드하는 설계의 타당성 검증
+# elfspike — 코어를 런타임에 로드하는 설계
 
-`docs/APP_PARTITION_CEILING.md`의 "코어를 SD에서 런타임 로딩하는 길" 절과 같이 볼 것.
+## 상태: **실기에서 진짜 코어가 돈다** (2026-08-05)
+
+펌웨어에 링크되지 않은 gnuboy가 relocatable ELF로 로드돼 게임보이 롬을 돌린다.
+
+    GBHOST: gnuboy module is 50952 bytes, ROM '/sd/roms/gb/gb.gb'
+    GBHOST: relocated in 9103 us
+    GBHOST: API table at 0x4ff4d960, abi 1 -- core is live
+    GBHOST: running
+    BUSY:100%, FPS:50
+
+이걸로 파티션이 기종 수를 제한하지 않는다 — 코어가 펌웨어 이미지가 아니라 파일이 된다.
+
+### 구성 요소
+
+| 파일 | 역할 |
+|---|---|
+| `gnuboy-module/` | gnuboy를 `project_elf()`로 빌드하는 별도 프로젝트. 산출물 `gnuboy_module.app.elf` (50,952바이트, 진입점 `0x790`) |
+| `gbhost.c` | 호스트. 심볼 테이블 등록 → 재배치 → API 테이블 수령 → 게임 루프 |
+| `bench.c` / `elfspike.c` | 앞서 쓴 합성 벤치마크(로더 자체 검증용) |
+| `loader-patches/` | `espressif__elf_loader` 1.3.2의 P4 결함 4개 수정본 |
+| `module/` | 벤치마크 모듈 프로젝트 |
+
+### 심볼 계약 — 생각보다 작다
+
+gnuboy가 호스트에 요구하는 건 **18개**뿐이고 대부분 libc다:
+
+    memcpy memset malloc calloc free abort rand
+    fopen fread fwrite fseek fclose feof
+    __adddf3 __divdf3 __floatsidf __fixdfsi     <- 소프트 double (gnuboy RTC)
+    rg_system_log                                <- 프레임워크에서 유일
+
+`gbhost.c`가 전부 명시적으로 등록한다. `CONFIG_ELF_LOADER_LIBC_SYMBOLS`로 libc를 자동
+제공할 수도 있지만, **코어의 import는 호스트와의 계약**이고 어떤 Kconfig가 켜졌느냐에
+따라 달라지는 계약은 계약이 아니다. 컴포넌트의 `tool/symbols.py`로 ELF에서 자동 생성도
+할 수 있다.
+
+libgcc 소프트 double이 목록에 있다는 게 모듈이 진짜 별개 코드라는 증거다 — gnuboy의 RTC
+연산이 double을 쓰고, 여기 RISC-V엔 하드웨어 double이 없어서 호스트 루틴으로 넘어온다.
+
+### 아직 확정 아닌 것
+
+- **성능 비교가 아직 공정하지 않다.** 정적 링크 gnuboy는 58fps / BUSY 17%인데 이건
+  50fps / BUSY 100%다. 그런데 `gbhost.c`의 루프가 `retro-core/main/main_gbc.c`와 다르다 —
+  프레임스킵도 `rg_display_sync()`도 없고 틱 계산도 다르다. **BUSY 100%는 코어 비용이
+  아니라 내 루프의 회계일 수 있다.** 같은 루프로 맞추기 전엔 인용하지 말 것.
+- **파티션을 탄다.** `0x3c0000`(prboom-go, 1472K)에서는 부팅하고 `0xef0000`(sm-go,
+  1280K)에서는 `invalid segment length 0xffffffff`로 거부된다. 이미지는 두 경우 모두
+  esptool 기준 유효하고 기기에서 읽어와도 해시가 맞는다. 크기는 1,160,928로 양쪽 다
+  들어간다. **원인 미상.** XIP 실패 때와 같은 서명이라 파티션 경계 쪽이 의심된다.
 
 ## 결론부터
 
