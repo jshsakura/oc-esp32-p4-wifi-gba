@@ -335,6 +335,11 @@ void app_main(void)
 
     app = rg_system_init(SNES_RATE, &handlers, NULL);
 
+#ifdef RG_ELF_SPIKE
+    extern void gbhost_run(void);
+    gbhost_run();
+#endif
+
     /* Two buffers: rg_display_submit() reads the surface in place on the display
      * task through a one-deep blocking queue, so a single buffer both tears and
      * stalls the emulator every frame. */

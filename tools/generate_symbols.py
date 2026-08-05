@@ -112,21 +112,70 @@ def generate_c_file(symbols, table_name, output_c_path):
     """
     Generate C source file declaring the symbols and defining the esp_elfsym table array.
     """
+    # Declare through the REAL headers wherever one exists.
+    #
+    # The first version emitted `extern int memcpy;` for everything and silenced
+    # -Wbuiltin-declaration-mismatch to get away with it. That takes the right
+    # address, but it is a lie about the type, and it does not survive contact
+    # with a host that includes <string.h> -- which every retro-go host does
+    # through rg_system.h: "'abort' redeclared as different kind of symbol".
+    #
+    # So pull in the headers, and hand-declare only what has none: the libgcc
+    # soft-float helpers, which are compiler internals with no public prototype.
     buf = [
         '/* Generated automatically by tools/generate_symbols.py. Do not edit. */',
         '#include <stddef.h>',
+        '#include <stdlib.h>',
+        '#include <string.h>',
+        '#include <stdio.h>',
+        '#include <rg_system.h>',
         '#include "private/elf_symbol.h"',
         '',
-        '#pragma GCC diagnostic push',
-        '#pragma GCC diagnostic ignored "-Wbuiltin-declaration-mismatch"',
+        '/* libgcc internals: no header declares these, so they are declared here',
+        ' * with their real signatures rather than as int. */',
+        'extern double __adddf3(double, double);',
+        'extern double __subdf3(double, double);',
+        'extern double __muldf3(double, double);',
+        'extern double __divdf3(double, double);',
+        'extern double __floatsidf(int);',
+        'extern double __floatunsidf(unsigned);',
+        'extern int __fixdfsi(double);',
+        'extern unsigned __fixunsdfsi(double);',
+        'extern float __truncdfsf2(double);',
+        'extern double __extendsfdf2(float);',
+        'extern int __ltdf2(double, double);',
+        'extern int __gtdf2(double, double);',
+        'extern int __eqdf2(double, double);',
+        'extern int __nedf2(double, double);',
+        'extern int __ledf2(double, double);',
+        'extern int __gedf2(double, double);',
+        '',
     ]
 
-    for sym in symbols:
-        buf.append(f'extern int {sym};')
+    # Anything the headers above do not cover and that is not a known libgcc
+    # helper has to be declared, but NOT as int -- a bare prototype-less
+    # declaration keeps the address right without asserting a wrong type.
+    known = {
+        '__adddf3', '__subdf3', '__muldf3', '__divdf3', '__floatsidf',
+        '__floatunsidf', '__fixdfsi', '__fixunsdfsi', '__truncdfsf2',
+        '__extendsfdf2', '__ltdf2', '__gtdf2', '__eqdf2', '__nedf2',
+        '__ledf2', '__gedf2',
+        'memcpy', 'memset', 'memmove', 'memcmp', 'strlen', 'strcmp', 'strncmp',
+        'strcpy', 'strncpy', 'strcat', 'snprintf', 'sprintf', 'printf', 'puts',
+        'malloc', 'calloc', 'realloc', 'free', 'abort', 'exit', 'rand', 'srand',
+        'atoi', 'strtol', 'qsort', 'abs',
+        'fopen', 'fread', 'fwrite', 'fseek', 'ftell', 'fclose', 'feof', 'fflush',
+        'rg_system_log',
+    }
+    extra = [s for s in symbols if s not in known]
+    if extra:
+        buf.append('/* Not covered by the headers above -- declared without a')
+        buf.append(' * prototype so the address is taken without claiming a type. */')
+        for sym in extra:
+            buf.append(f'extern void {sym}();')
+        buf.append('')
 
     buf.extend([
-        '#pragma GCC diagnostic pop',
-        '',
         f'const struct esp_elfsym {table_name}[] = {{'
     ])
 

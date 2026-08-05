@@ -1,7 +1,7 @@
 # ==============================================================================
 # SYMBOL IMPORT CONTRACT ARTIFACT
 # Module: gnuboy_module.app.elf
-# Host:   fmsx.elf
+# Host:   N/A
 # Total Imported Symbols: 18
 # ==============================================================================
 
