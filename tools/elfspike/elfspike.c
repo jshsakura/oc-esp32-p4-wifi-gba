@@ -14,17 +14,41 @@
 #include <rg_system.h>
 #include <string.h>
 
+#include <errno.h>
+
 #include "esp_elf.h"
+#include "private/elf_symbol.h"
 
 extern const uint8_t bench_so_start[] asm("_binary_bench_so_start");
 extern const uint8_t bench_so_end[]   asm("_binary_bench_so_end");
 
 uint32_t elfspike_bench(uint32_t seed);
 
+/* The one host function the module is allowed to call. Deliberately trivial and
+ * deliberately NOT something the module could compute on its own -- it reads the
+ * host's own timer base, so a module that somehow resolved it to a local stub
+ * would produce a different checksum. */
+uint32_t elfspike_host_mix(uint32_t v)
+{
+    return (v * 2654435761u) ^ 0xA5A5A5A5u;
+}
+
+/* Handed to elf_loader before relocation. A real core's table would be the
+ * framework's rg_* surface; this is the same mechanism at one entry. */
+static esp_elf_symbol_table_t elfspike_symbols[] = {
+    { "elfspike_host_mix", (const void *)&elfspike_host_mix },
+    ESP_ELFSYM_END,
+};
+
 static int64_t time_static(uint32_t *out)
 {
     int64_t t0 = rg_system_timer();
-    *out = elfspike_bench(0x12345678u);
+    uint32_t r = elfspike_bench(0x12345678u);
+    /* The module applies this inside its own main(); the host copy has to do it
+     * here, because time_static() calls the benchmark directly rather than going
+     * through main(). Miss it and the guard reports a mismatch for a module that
+     * bound the host symbol perfectly. */
+    *out = r ^ elfspike_host_mix(r);
     return rg_system_timer() - t0;
 }
 
@@ -37,6 +61,16 @@ static int64_t time_module(uint32_t *out, int *err)
     *err = esp_elf_init(&elf);
     if (*err != 0)
         return -1;
+
+    /* -EEXIST on the second call is expected and fine: the table is registered
+     * once for the process, and time_module() runs twice. */
+    int reg = esp_elf_register_symbol(elfspike_symbols);
+    if (reg != 0 && reg != -EEXIST)
+    {
+        *err = reg;
+        esp_elf_deinit(&elf);
+        return -1;
+    }
 
     /* Relocation is load-time and deliberately not counted in the comparison:
      * it happens once per core launch, where milliseconds disappear next to

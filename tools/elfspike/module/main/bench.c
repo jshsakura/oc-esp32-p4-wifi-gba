@@ -74,6 +74,20 @@ uint32_t elfspike_bench(uint32_t seed)
     return sum;
 }
 
+/* Provided by the HOST, not by this module.
+ *
+ * This is the whole point of the second half of the spike. A module that only
+ * runs its own code proves the loader relocates and the CPU executes; it proves
+ * nothing about whether a real core can work, because a real core is almost
+ * entirely calls back into the framework -- rg_display_submit, rg_audio_submit,
+ * rg_alloc. Those have to resolve, at load time, against the running firmware.
+ *
+ * In the module build this is an undefined symbol that elf_loader must find in
+ * the host's registered symbol table. In the host build it is just a call. Both
+ * feed the same checksum, so if the binding resolves to the wrong thing the
+ * comparison says so instead of the run looking fine. */
+extern uint32_t elfspike_host_mix(uint32_t v);
+
 /* elf_loader's esp_elf_request() enters the module at main() -- and DISCARDS the
  * return value (esp_elf.c: it calls elf->entry(argc, argv) and returns 0
  * regardless). So the checksum comes back through argv[0], which the host points
@@ -82,6 +96,7 @@ uint32_t elfspike_bench(uint32_t seed)
 int main(int argc, char **argv)
 {
     uint32_t r = elfspike_bench(0x12345678u);
+    r ^= elfspike_host_mix(r);   /* the call that has to cross back into the host */
     if (argc > 0 && argv && argv[0])
         *(uint32_t *)argv[0] = r;
     return (int)r;
