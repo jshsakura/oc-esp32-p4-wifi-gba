@@ -149,6 +149,13 @@ def generate_c_file(symbols, table_name, output_c_path):
         'extern int __nedf2(double, double);',
         'extern int __ledf2(double, double);',
         'extern int __gedf2(double, double);',
+        'extern unsigned long long __udivdi3(unsigned long long, unsigned long long);',
+        'extern long long __divdi3(long long, long long);',
+        'extern unsigned long long __umoddi3(unsigned long long, unsigned long long);',
+        'extern long long __moddi3(long long, long long);',
+        'extern long long __ashldi3(long long, int);',
+        'extern long long __ashrdi3(long long, int);',
+        'extern unsigned long long __lshrdi3(unsigned long long, int);',
         '',
     ]
 
@@ -159,13 +166,23 @@ def generate_c_file(symbols, table_name, output_c_path):
         '__adddf3', '__subdf3', '__muldf3', '__divdf3', '__floatsidf',
         '__floatunsidf', '__fixdfsi', '__fixunsdfsi', '__truncdfsf2',
         '__extendsfdf2', '__ltdf2', '__gtdf2', '__eqdf2', '__nedf2',
-        '__ledf2', '__gedf2',
-        'memcpy', 'memset', 'memmove', 'memcmp', 'strlen', 'strcmp', 'strncmp',
-        'strcpy', 'strncpy', 'strcat', 'snprintf', 'sprintf', 'printf', 'puts',
-        'malloc', 'calloc', 'realloc', 'free', 'abort', 'exit', 'rand', 'srand',
-        'atoi', 'strtol', 'qsort', 'abs',
+        '__ledf2', '__gedf2', '__udivdi3', '__divdi3', '__umoddi3', '__moddi3',
+        '__ashldi3', '__ashrdi3', '__lshrdi3',
+        # <string.h>
+        'memcpy', 'memset', 'memmove', 'memcmp', 'memchr', 'strlen', 'strnlen',
+        'strcmp', 'strncmp', 'strcpy', 'strncpy', 'strcat', 'strncat', 'strdup',
+        'strndup', 'strstr', 'strchr', 'strrchr', 'strtok', 'strcasecmp',
+        'strncasecmp', 'strerror',
+        # <stdio.h>
+        'snprintf', 'sprintf', 'printf', 'fprintf', 'vsnprintf', 'puts', 'putchar',
         'fopen', 'fread', 'fwrite', 'fseek', 'ftell', 'fclose', 'feof', 'fflush',
-        'rg_system_log',
+        'rewind', 'fgets', 'fputs', 'fgetc', 'fputc', 'ferror', 'remove', 'rename',
+        # <stdlib.h>
+        'malloc', 'calloc', 'realloc', 'free', 'abort', 'exit', 'rand', 'srand',
+        'atoi', 'atol', 'strtol', 'strtoul', 'strtod', 'qsort', 'bsearch', 'abs',
+        'labs', 'getenv',
+        # retro-go (rg_system.h and what it pulls in)
+        'rg_system_log', 'rg_crc32', 'rg_alloc', 'rg_system_timer',
     }
     extra = [s for s in symbols if s not in known]
     if extra:

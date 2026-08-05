@@ -32,24 +32,27 @@ extern long long __ashldi3(long long, int);
 extern long long __ashrdi3(long long, int);
 extern unsigned long long __lshrdi3(unsigned long long, int);
 
-const struct esp_elfsym gb_host_symbols[] = {
-    ESP_ELFSYM_EXPORT(__adddf3),
-    ESP_ELFSYM_EXPORT(__divdf3),
+const struct esp_elfsym nes_host_symbols[] = {
     ESP_ELFSYM_EXPORT(__fixdfsi),
     ESP_ELFSYM_EXPORT(__floatsidf),
-    ESP_ELFSYM_EXPORT(abort),
+    ESP_ELFSYM_EXPORT(__muldf3),
+    ESP_ELFSYM_EXPORT(__udivdi3),
     ESP_ELFSYM_EXPORT(calloc),
     ESP_ELFSYM_EXPORT(fclose),
-    ESP_ELFSYM_EXPORT(feof),
     ESP_ELFSYM_EXPORT(fopen),
     ESP_ELFSYM_EXPORT(fread),
     ESP_ELFSYM_EXPORT(free),
     ESP_ELFSYM_EXPORT(fseek),
+    ESP_ELFSYM_EXPORT(ftell),
     ESP_ELFSYM_EXPORT(fwrite),
     ESP_ELFSYM_EXPORT(malloc),
+    ESP_ELFSYM_EXPORT(memcmp),
     ESP_ELFSYM_EXPORT(memcpy),
     ESP_ELFSYM_EXPORT(memset),
-    ESP_ELFSYM_EXPORT(rand),
+    ESP_ELFSYM_EXPORT(realloc),
+    ESP_ELFSYM_EXPORT(rg_crc32),
     ESP_ELFSYM_EXPORT(rg_system_log),
+    ESP_ELFSYM_EXPORT(strdup),
+    ESP_ELFSYM_EXPORT(strstr),
     ESP_ELFSYM_END
 };

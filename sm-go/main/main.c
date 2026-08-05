@@ -336,8 +336,15 @@ void app_main(void)
     app = rg_system_init(SNES_RATE, &handlers, NULL);
 
 #ifdef RG_ELF_SPIKE
+    /* The dispatch the product wants: one host, cores as files, chosen by the
+     * same configNs retro-core uses to pick among its twenty linked systems --
+     * except here the ones not chosen are not in the binary at all. */
     extern void gbhost_run(void);
-    gbhost_run();
+    extern void neshost_run(void);
+    if (strcmp(app->configNs, "nes") == 0)
+        neshost_run();
+    else
+        gbhost_run();
 #endif
 
     /* Two buffers: rg_display_submit() reads the surface in place on the display

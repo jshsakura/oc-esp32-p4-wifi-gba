@@ -24,6 +24,13 @@ extern int __eqdf2(double, double);
 extern int __nedf2(double, double);
 extern int __ledf2(double, double);
 extern int __gedf2(double, double);
+extern unsigned long long __udivdi3(unsigned long long, unsigned long long);
+extern long long __divdi3(long long, long long);
+extern unsigned long long __umoddi3(unsigned long long, unsigned long long);
+extern long long __moddi3(long long, long long);
+extern long long __ashldi3(long long, int);
+extern long long __ashrdi3(long long, int);
+extern unsigned long long __lshrdi3(unsigned long long, int);
 
 const struct esp_elfsym gb_host_symbols[] = {
     ESP_ELFSYM_EXPORT(__adddf3),
