@@ -722,30 +722,28 @@ static void application(const char *desc, const char *name, const char *exts, co
 
 void applications_init(void)
 {
-    // NES, Game Boy and Game Boy Color point at retro-core, NOT at fceumm-go and
-    // tgbdual-go, because those two live above 16MB (0x1030000, 0x1230000) and
-    // this bootloader cannot boot from there. It does not fail politely either:
-    // pointing otadata at one wedges the MSPI and every slot afterwards reads
-    // back "invalid magic byte", the launcher included, so the board boot-loops.
+    // NES, Game Boy and Game Boy Color run on coreloader -- the app that carries
+    // no emulator at all and reads its core from /sd/retro-go/cores/<name>.elf.
     //
-    // The Kconfig option that lifts that ceiling exists and WORKS IN ISOLATION --
-    // BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH, behind IDF_EXPERIMENTAL_FEATURES.
-    // With it, both partitions booted and ran (NES 40 fps, Game Boy ~200 fps).
-    // But turning it on for the whole build watchdog-reset the bootloader in a
-    // loop and took every app down with it, and pinning SPI_FLASH_HPM_DIS did
-    // not save it. Espressif marks the option "can't use on all flash chips
-    // stable" and this board appears to be one of those chips. Reverted; the
-    // whole episode is written up in docs/APP_PARTITION_CEILING.md.
+    // They used to point at fceumm-go and tgbdual-go, which cannot boot: those
+    // partitions start above 16MB and this bootloader cannot read there. Then
+    // they were parked on retro-core's older cores as a stopgap. coreloader is
+    // the actual answer -- the ceiling that forced both detours is a property of
+    // partitions, and a core that is a file does not need one.
     //
-    // So this stays as-is until that is understood. retro-core's nofrendo
-    // (57 fps) and gnuboy (58 / 55) are measured and real.
-    application("Nintendo Entertainment System", "nes", "nes fc zip", "retro-core", 0);
+    // Measured on device against the same cores linked into retro-core:
+    //
+    //     Game Boy (gnuboy)   2,925 us/frame   linked build 3,002
+    //     NES (nofrendo)      2,304 us/frame   linked build 57.4 fps
+    //
+    // Loading is free per frame; relocation is 6-9ms once per launch.
+    application("Nintendo Entertainment System", "nes", "nes fc zip", "coreloader", 0);
     application("Super Nintendo", "snes", "smc sfc zip", "retro-core", 0);
     // The same system on the `sm` core, alongside snes9x rather than replacing it
     // until there is a device measurement to choose on. See sm-go/main/main.c.
     application("Super Nintendo (sm)", "sm", "smc sfc zip", "sm-go", 0);
-    application("Nintendo Gameboy", "gb", "gb gbc zip", "retro-core", 0);
-    application("Nintendo Gameboy Color", "gbc", "gbc gb zip", "retro-core", 0);
+    application("Nintendo Gameboy", "gb", "gb gbc zip", "coreloader", 0);
+    application("Nintendo Gameboy Color", "gbc", "gbc gb zip", "coreloader", 0);
     application("Nintendo Gameboy Advance", "gba", "gba zip", "gbsp", 0);
     application("Nintendo Game & Watch", "gw", "gw", "retro-core", 0);
     application("Sega SG-1000", "sg1", "sms sg sg1", "retro-core", 0);
@@ -764,7 +762,6 @@ void applications_init(void)
     application("Atari 7800", "a78", "a78 bin zip", "retro-core", 0);
     application("Tamagotchi", "tama", "tama bin zip", "tamalib-go", 0);
     application("Neo Geo Pocket Color", "ngp", "ngp ngc zip", "retro-core", 0);
-    application("DOOM", "doom", "wad zip", "prboom-go", 0);
     application("Watara Supervision", "supervision", "sv bin zip", "retro-core", 0);
     application("Pokemon Mini", "poke", "min zip", "retro-core", 0);
     application("Bandai WonderSwan", "wsc", "ws wsc zip", "retro-core", 0);

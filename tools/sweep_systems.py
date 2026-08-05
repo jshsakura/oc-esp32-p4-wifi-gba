@@ -63,10 +63,10 @@ SYSTEMS = {
     # (and the bootloader rebuilt), both come up. snes/sms/gg/sg1/col/pce/gw/a26/
     # a78/ngp/supervision/poke/wsc/vb/videopac/zxs/gamecom stay on retro-core --
     # one binary, many systems.
-    "nes":         ("retro-core", 0x110000),
+    "nes":         ("coreloader", 0x0),
     "snes":        ("retro-core", 0x110000),
-    "gb":          ("retro-core", 0x110000),
-    "gbc":         ("retro-core", 0x110000),
+    "gb":          ("coreloader", 0x0),
+    "gbc":         ("coreloader", 0x0),
     "sms":         ("retro-core", 0x110000),
     "gg":          ("retro-core", 0x110000),
     "sg1":         ("retro-core", 0x110000),

@@ -16,7 +16,7 @@ DEFAULT_TARGET = os.getenv("RG_TOOL_TARGET", "esp32p4")
 DEFAULT_BAUD = os.getenv("RG_TOOL_BAUD", "1152000")
 DEFAULT_PORT = os.getenv("RG_TOOL_PORT", "COM3")
 # DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core")
-DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core gbsp gwenesis fmsx prboom-go fake08 picodrive-go sm-go tamalib-go caprice32-go fceumm-go tgbdual-go")
+DEFAULT_APPS = os.getenv("RG_TOOL_APPS", "launcher retro-core gbsp gwenesis fmsx coreloader fake08 picodrive-go sm-go tamalib-go caprice32-go fceumm-go tgbdual-go")
 DEFAULT_NO_NETWORKING = os.getenv("RG_TOOL_NO_NETWORKING", "0") == "1"
 PROJECT_NAME = os.getenv("PROJECT_NAME", "retro-go")
 PROJECT_VER = os.getenv("PROJECT_VER", "2.0")
@@ -29,7 +29,12 @@ PROJECT_APPS = {
   # rejected loudly -- the bootloader silently starts a different app -- so the floor carries
   # real headroom rather than tracking the binary. (build_image() still grows it to fit.)
   'retro-core':   [0, 0, 1966080],
-  'prboom-go':    [0, 0, 851968],
+  # coreloader takes the slot DOOM was holding. prboom-go has never had a WAD on
+  # the card, and coreloader is the app that stops needing new slots at all:
+  # it carries no cores, it loads them from /sd/retro-go/cores/*.elf. The size is
+  # the host plus the seed copies of gnuboy and nofrendo; a device whose card can
+  # be written from a PC would not need those and would be far smaller.
+  'coreloader':   [0, 0, 1441792],
   'gwenesis':     [0, 0, 983040],
   'fmsx':         [0, 0, 589824],
   'gbsp':         [0, 0, 851968],

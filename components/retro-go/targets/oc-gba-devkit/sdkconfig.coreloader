@@ -1,0 +1,23 @@
+# coreloader loads emulator cores at runtime from /sd/retro-go/cores/*.elf.
+#
+# Modules go to INTERNAL SRAM, not PSRAM. elf_loader defaults to PSRAM, but
+# making PSRAM instruction-fetchable needs CONFIG_SPIRAM_XIP_FROM_PSRAM, and the
+# loader and XIP together produce an image this bootloader rejects. Internal RAM
+# is also where the reference port puts its running core, and there is room:
+# moving twenty cores' statics out of retro-core left ~376KB free.
+CONFIG_ELF_LOADER_LOAD_PSRAM=n
+
+# A module's calls to its own functions go through the PLT, and the code that
+# resolves those is behind this. Without it, relocation fails -ENOSYS on any
+# core that calls itself -- which is every core.
+CONFIG_ELF_DYNAMIC_LOAD_SHARED_OBJECT=y
+
+# The PMP's IRAM/DRAM split is what makes internal RAM non-executable; P4's heap
+# only advertises MALLOC_CAP_EXEC when this is off. A device that loads code at
+# runtime cannot also have W^X for free, and this is that trade, made on purpose.
+CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT=n
+
+# The cores' drivers run on app_main's frame, and nofrendo's init chain plus
+# newlib's vfprintf overflow the 8KB default -- the same fault stella and fceumm
+# hit.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
