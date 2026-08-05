@@ -53,33 +53,9 @@ static int64_t audio_time = 0;
  * The libgcc entries are the tell that the module is genuinely separate code:
  * gnuboy's RTC arithmetic uses doubles, RISC-V has no hardware double here, so
  * the module calls into the host's soft-float routines.
- */
-extern double __adddf3(double, double);
-extern double __divdf3(double, double);
-extern double __floatsidf(int);
-extern int __fixdfsi(double);
-
-static esp_elf_symbol_table_t gb_host_symbols[] = {
-    { "memcpy",       (const void *)&memcpy },
-    { "memset",       (const void *)&memset },
-    { "malloc",       (const void *)&malloc },
-    { "calloc",       (const void *)&calloc },
-    { "free",         (const void *)&free },
-    { "abort",        (const void *)&abort },
-    { "rand",         (const void *)&rand },
-    { "fopen",        (const void *)&fopen },
-    { "fread",        (const void *)&fread },
-    { "fwrite",       (const void *)&fwrite },
-    { "fseek",        (const void *)&fseek },
-    { "fclose",       (const void *)&fclose },
-    { "feof",         (const void *)&feof },
-    { "__adddf3",     (const void *)&__adddf3 },
-    { "__divdf3",     (const void *)&__divdf3 },
-    { "__floatsidf",  (const void *)&__floatsidf },
-    { "__fixdfsi",    (const void *)&__fixdfsi },
-    { "rg_system_log", (const void *)&rg_system_log },
-    ESP_ELFSYM_END,
-};
+/* The symbol table is generated automatically by tools/generate_symbols.py
+ * as part of the build pipeline (Lane C). See gbhost_symbols.c & gnuboy_module.imports.txt */
+#include "gbhost_symbols.c"
 
 /* ---- the core's callbacks --------------------------------------------------
  * Called BY the loaded module, INTO this firmware. The reverse direction of the

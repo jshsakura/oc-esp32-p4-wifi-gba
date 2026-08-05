@@ -1,0 +1,25 @@
+# ==============================================================================
+# SYMBOL IMPORT CONTRACT ARTIFACT
+# Module: gnuboy_module.app.elf
+# Host:   fmsx.elf
+# Total Imported Symbols: 18
+# ==============================================================================
+
+__adddf3
+__divdf3
+__fixdfsi
+__floatsidf
+abort
+calloc
+fclose
+feof
+fopen
+fread
+free
+fseek
+fwrite
+malloc
+memcpy
+memset
+rand
+rg_system_log
