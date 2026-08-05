@@ -34,6 +34,8 @@ extern const uint8_t gbmod_end[]   asm("_binary_gnuboy_module_app_elf_end");
 
 static rg_surface_t *updates[2];
 static rg_surface_t *currentUpdate;
+static bool slowFrame = false;
+static int64_t audio_time = 0;
 
 /* ---- the symbol table -------------------------------------------------------
  *
@@ -83,12 +85,15 @@ static esp_elf_symbol_table_t gb_host_symbols[] = {
  * loadable. */
 static void video_callback(void *buffer)
 {
+    slowFrame = !rg_display_sync(false);
     rg_display_submit(currentUpdate, 0);
 }
 
 static void audio_callback(void *buffer, size_t length)
 {
+    int64_t startTime = rg_system_timer();
     rg_audio_submit(buffer, length >> 1);
+    audio_time += rg_system_timer() - startTime;
 }
 
 void gbhost_run(void)
@@ -158,26 +163,59 @@ void gbhost_run(void)
     api->reset(true);
     RG_LOGW("GBHOST: running");
 
+    /* Paced exactly like retro-core/main/main_gbc.c, because the point of this
+     * host is to be comparable to the statically linked core rather than merely
+     * to work. Frameskip on overrun, rg_display_sync() in the video callback,
+     * and audio time subtracted from the tick -- get any of those wrong and the
+     * comparison measures the loop instead of the loading. */
+    rg_app_t *app = rg_system_get_app();
+    uint32_t joystick_old = -1;
+    int skipFrames = 0;
+
     while (1)
     {
         uint32_t joystick = rg_input_read_gamepad();
-        int pad = 0;
-        if (joystick & RG_KEY_UP)     pad |= GB_PAD_UP;
-        if (joystick & RG_KEY_RIGHT)  pad |= GB_PAD_RIGHT;
-        if (joystick & RG_KEY_DOWN)   pad |= GB_PAD_DOWN;
-        if (joystick & RG_KEY_LEFT)   pad |= GB_PAD_LEFT;
-        if (joystick & RG_KEY_SELECT) pad |= GB_PAD_SELECT;
-        if (joystick & RG_KEY_START)  pad |= GB_PAD_START;
-        if (joystick & RG_KEY_A)      pad |= GB_PAD_A;
-        if (joystick & RG_KEY_B)      pad |= GB_PAD_B;
-        api->set_pad(pad);
+        if (joystick != joystick_old)
+        {
+            int pad = 0;
+            if (joystick & RG_KEY_UP)     pad |= GB_PAD_UP;
+            if (joystick & RG_KEY_RIGHT)  pad |= GB_PAD_RIGHT;
+            if (joystick & RG_KEY_DOWN)   pad |= GB_PAD_DOWN;
+            if (joystick & RG_KEY_LEFT)   pad |= GB_PAD_LEFT;
+            if (joystick & RG_KEY_SELECT) pad |= GB_PAD_SELECT;
+            if (joystick & RG_KEY_START)  pad |= GB_PAD_START;
+            if (joystick & RG_KEY_A)      pad |= GB_PAD_A;
+            if (joystick & RG_KEY_B)      pad |= GB_PAD_B;
+            api->set_pad(pad);
+            joystick_old = joystick;
+        }
 
         int64_t startTime = rg_system_timer();
+        bool drawFrame = !skipFrames;
+        audio_time = 0;
 
-        currentUpdate = updates[currentUpdate == updates[0]];
-        api->set_framebuffer(currentUpdate->data);
-        api->run(true);
+        if (drawFrame)
+        {
+            currentUpdate = updates[currentUpdate == updates[0]];
+            api->set_framebuffer(currentUpdate->data);
+        }
+        api->run(drawFrame);
 
-        rg_system_tick(rg_system_timer() - startTime);
+        rg_system_tick(rg_system_timer() - startTime - audio_time);
+
+        if (skipFrames == 0)
+        {
+            int elapsed = rg_system_timer() - startTime;
+            if (app->frameskip > 0)
+                skipFrames = app->frameskip;
+            else if (elapsed > app->frameTime + 1500)
+                skipFrames = 1;
+            else if (drawFrame && slowFrame)
+                skipFrames = 1;
+        }
+        else if (skipFrames > 0)
+        {
+            skipFrames--;
+        }
     }
 }

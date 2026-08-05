@@ -8,7 +8,15 @@
     GBHOST: relocated in 9103 us
     GBHOST: API table at 0x4ff4d960, abi 1 -- core is live
     GBHOST: running
-    BUSY:100%, FPS:50
+
+**그리고 공짜다.** 페이싱을 `retro-core/main/main_gbc.c`와 똑같이 맞추고 재니:
+
+| | fps | BUSY | us/frame |
+|---|---|---|---|
+| 정적 링크 gnuboy (retro-core) | 58.1 | 17.4% | 3,002 |
+| **런타임 로드 gnuboy** | **58.2** | **17.0%** | **2,914** |
+
+노이즈 안이다. **코어를 런타임에 로드하는 데 드는 프레임 비용이 측정되지 않는다.**
 
 이걸로 파티션이 기종 수를 제한하지 않는다 — 코어가 펌웨어 이미지가 아니라 파일이 된다.
 
@@ -41,10 +49,10 @@ libgcc 소프트 double이 목록에 있다는 게 모듈이 진짜 별개 코�
 
 ### 아직 확정 아닌 것
 
-- **성능 비교가 아직 공정하지 않다.** 정적 링크 gnuboy는 58fps / BUSY 17%인데 이건
-  50fps / BUSY 100%다. 그런데 `gbhost.c`의 루프가 `retro-core/main/main_gbc.c`와 다르다 —
-  프레임스킵도 `rg_display_sync()`도 없고 틱 계산도 다르다. **BUSY 100%는 코어 비용이
-  아니라 내 루프의 회계일 수 있다.** 같은 루프로 맞추기 전엔 인용하지 말 것.
+- ~~성능 비교가 공정하지 않다~~ **해결됨.** 첫 측정의 50fps/BUSY100%는 전부 내 루프
+  탓이었다 — 프레임스킵도 `rg_display_sync()`도 없었다. `main_gbc.c`와 똑같이 맞추니
+  58.2fps / 2,914 us/frame으로 정적 링크판과 일치한다. **루프를 먼저 맞추지 않고 잰
+  숫자는 로딩이 아니라 루프를 잰 것이다.**
 - **파티션을 탄다.** `0x3c0000`(prboom-go, 1472K)에서는 부팅하고 `0xef0000`(sm-go,
   1280K)에서는 `invalid segment length 0xffffffff`로 거부된다. 이미지는 두 경우 모두
   esptool 기준 유효하고 기기에서 읽어와도 해시가 맞는다. 크기는 1,160,928로 양쪽 다
