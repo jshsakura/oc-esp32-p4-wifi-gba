@@ -5,16 +5,23 @@
 펌웨어에 링크되지 않은 gnuboy가 relocatable ELF로 로드돼 게임보이 롬을 돌린다.
 
     GBHOST: gnuboy module is 50952 bytes, ROM '/sd/roms/gb/gb.gb'
-    GBHOST: relocated in 9103 us
+    GBHOST: loaded core from /sd/retro-go/cores/gnuboy.elf (50952 bytes)
+    GBHOST: relocated in 6339 us
     GBHOST: API table at 0x4ff4d960, abi 1 -- core is live
     GBHOST: running
+
+**코어는 카드 위의 파일이다.** 첫 부팅이 임베드본을 `/sd/retro-go/cores/`에 떨어뜨리고,
+그 뒤로는 파일에서 읽는다(위 로그가 두 번째 부팅이라 시딩 줄이 없다). 임베드본이 있는
+이유는 이 보드의 카드가 케이스 안에 봉인돼 있어서일 뿐이고, 출하 기기라면 처음부터
+파일만 있으면 된다.
 
 **그리고 공짜다.** 페이싱을 `retro-core/main/main_gbc.c`와 똑같이 맞추고 재니:
 
 | | fps | BUSY | us/frame |
 |---|---|---|---|
 | 정적 링크 gnuboy (retro-core) | 58.1 | 17.4% | 3,002 |
-| **런타임 로드 gnuboy** | **58.2** | **17.0%** | **2,914** |
+| 런타임 로드 (임베드본) | 58.2 | 17.0% | 2,914 |
+| **런타임 로드 (SD 파일)** | **58.1** | **17.1%** | **2,940** |
 
 노이즈 안이다. **코어를 런타임에 로드하는 데 드는 프레임 비용이 측정되지 않는다.**
 

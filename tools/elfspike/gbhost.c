@@ -23,6 +23,8 @@
 #include "esp_elf.h"
 #include "private/elf_symbol.h"
 
+#include <rg_storage.h>
+
 #include "gnuboy.h"
 #include "gnuboy_module.h"
 
@@ -116,14 +118,50 @@ void gbhost_run(void)
         return;
     }
 
+    /* Load the core from the CARD, not from this binary.
+     *
+     * That is the whole deployment model: a core is a file. The embedded copy
+     * exists only to seed it -- this board's SD card is sealed inside the case,
+     * so the first boot writes the module out and every boot after reads it
+     * back, which is the path a shipping device would take from the start.
+     *
+     * Read into a buffer and hand that to esp_elf_relocate(), which is what
+     * esp_elf_open() does internally, minus a dependency on
+     * CONFIG_ELF_FILE_SYSTEM_BASE_PATH. */
+    const char *core_path = RG_BASE_PATH "/cores/gnuboy.elf";
+    const uint8_t *image = NULL;
+    void *filebuf = NULL;
+
+    rg_storage_mkdir(RG_BASE_PATH "/cores");
+    if (!rg_storage_exists(core_path))
+    {
+        RG_LOGW("GBHOST: seeding %s from the embedded copy", core_path);
+        if (!rg_storage_write_file(core_path, gbmod_start, modsize, 0))
+            RG_LOGE("GBHOST: could not write the core to the card");
+    }
+
+    size_t filelen = 0;
+    if (rg_storage_read_file(core_path, &filebuf, &filelen, 0) && filelen == modsize)
+    {
+        RG_LOGW("GBHOST: loaded core from %s (%u bytes)", core_path, (unsigned)filelen);
+        image = (const uint8_t *)filebuf;
+    }
+    else
+    {
+        RG_LOGE("GBHOST: could not read %s, falling back to the embedded copy", core_path);
+        image = gbmod_start;
+    }
+
     int64_t t0 = rg_system_timer();
-    if ((rc = esp_elf_relocate(&elf, gbmod_start)) != 0)
+    if ((rc = esp_elf_relocate(&elf, image)) != 0)
     {
         RG_LOGE("GBHOST: relocate failed, rc=%d -- an unresolved import is the "
                 "usual cause, check the table against readelf -r", rc);
         return;
     }
     RG_LOGW("GBHOST: relocated in %lld us", rg_system_timer() - t0);
+    /* The relocated image is independent of the buffer it came from. */
+    free(filebuf);
 
     /* The module returns its API table through argv[0], which is also what keeps
      * gc-sections from stripping a core nobody appears to call. */
