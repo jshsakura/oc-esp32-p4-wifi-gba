@@ -1,0 +1,27 @@
+# ==============================================================================
+# SYMBOL IMPORT CONTRACT ARTIFACT
+# Module: pce_go_module.app.elf
+# Host:   N/A
+# Total Imported Symbols: 20
+# ==============================================================================
+
+__fixdfsi
+__floatsidf
+__muldf3
+calloc
+fclose
+fopen
+fread
+free
+fseek
+ftell
+fwrite
+malloc
+memcpy
+memset
+osd_gfx_framebuffer
+osd_input_read
+osd_vsync
+rg_crc32
+rg_system_log
+strncmp

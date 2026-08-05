@@ -1,0 +1,27 @@
+# ==============================================================================
+# SYMBOL IMPORT CONTRACT ARTIFACT
+# Module: smsplus_module.app.elf
+# Host:   N/A
+# Total Imported Symbols: 20
+# ==============================================================================
+
+__assert_func
+__extendsfdf2
+abort
+calloc
+fclose
+fopen
+fread
+free
+fseek
+ftell
+fwrite
+malloc
+memcmp
+memcpy
+memset
+rg_crc32
+rg_system_log
+strcasecmp
+strcmp
+strlen

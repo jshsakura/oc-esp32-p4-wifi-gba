@@ -1,0 +1,28 @@
+# ==============================================================================
+# SYMBOL IMPORT CONTRACT ARTIFACT
+# Module: nofrendo_module.app.elf
+# Host:   N/A
+# Total Imported Symbols: 21
+# ==============================================================================
+
+__fixdfsi
+__floatsidf
+__muldf3
+__udivdi3
+calloc
+fclose
+fopen
+fread
+free
+fseek
+ftell
+fwrite
+malloc
+memcmp
+memcpy
+memset
+realloc
+rg_crc32
+rg_system_log
+strdup
+strstr
