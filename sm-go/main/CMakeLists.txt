@@ -1,7 +1,6 @@
 set(COMPONENT_SRCDIRS ".")
-set(COMPONENT_EMBED_FILES "gnuboy_module.app.elf" "nofrendo_module.app.elf")
-set(COMPONENT_ADD_INCLUDEDIRS "." "../../retro-core/components/gnuboy" "../../retro-core/components/nofrendo" "../../retro-core/components/nofrendo/nes")
-set(COMPONENT_REQUIRES "retro-go" "sm" "espressif__elf_loader")
+set(COMPONENT_ADD_INCLUDEDIRS ".")
+set(COMPONENT_REQUIRES "retro-go" "sm")
 register_component()
 # If SNES_SPIN_SKIP is ever turned back on, it has to be defined HERE as well as
 # in the sm component: the purity hooks live in cpu.c, but the replay branch and
@@ -10,4 +9,4 @@ register_component()
 #
 # It is off today because it measured slower -- see the numbers in
 # components/sm/CMakeLists.txt.
-rg_setup_compile_options(-O2 -Wno-unused-variable -DRG_ELF_SPIKE=1)
+rg_setup_compile_options(-O2 -Wno-unused-variable)
