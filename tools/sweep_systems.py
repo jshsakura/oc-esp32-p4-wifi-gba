@@ -63,10 +63,10 @@ SYSTEMS = {
     # (and the bootloader rebuilt), both come up. snes/sms/gg/sg1/col/pce/gw/a26/
     # a78/ngp/supervision/poke/wsc/vb/videopac/zxs/gamecom stay on retro-core --
     # one binary, many systems.
-    "nes":         ("coreloader", 0x0),
+    "nes":         ("coreloader", 0x3c0000),
     "snes":        ("retro-core", 0x110000),
-    "gb":          ("coreloader", 0x0),
-    "gbc":         ("coreloader", 0x0),
+    "gb":          ("coreloader", 0x3c0000),
+    "gbc":         ("coreloader", 0x3c0000),
     "sms":         ("retro-core", 0x110000),
     "gg":          ("retro-core", 0x110000),
     "sg1":         ("retro-core", 0x110000),
@@ -83,13 +83,13 @@ SYSTEMS = {
     "videopac":    ("retro-core", 0x110000),
     "zxs":         ("retro-core", 0x110000),
     "gamecom":     ("retro-core", 0x110000),
-    "md":          ("gwenesis",     0x530000),
-    "gba":         ("gbsp",         0x7f0000),
-    "msx":         ("fmsx",         0x6c0000),
-    "sm":          ("sm-go",        0xef0000, "snes"),
-    "segacd":      ("picodrive-go", 0xb00000),
-    "cpc":         ("caprice32-go", 0xd90000),
-    "tama":        ("tamalib-go",   0xca0000),
+    "md":          ("gwenesis",     0x520000),
+    "gba":         ("gbsp",         0x7e0000),
+    "msx":         ("fmsx",         0x6b0000),
+    "sm":          ("sm-go",        0xee0000, "snes"),
+    "segacd":      ("picodrive-go", 0xaf0000),
+    "cpc":         ("caprice32-go", 0xd80000),
+    "tama":        ("tamalib-go",   0xc90000),
 }
 
 
@@ -114,6 +114,15 @@ def sweep(system):
                f'{env} python3 rg_tool.py build {app} --target {TARGET}"')
     if "All done" not in build.stdout:
         return "BUILD FAILED", build.stdout + build.stderr
+
+    # Never write below the partition table. A zero or otherwise bogus offset in
+    # SYSTEMS puts an app image on top of the bootloader (0x2000) and the table
+    # (0x8000), which bricks the board until the whole image is reflashed --
+    # done once, on 2026-08-05, by exactly this mistake. The table above is
+    # hand-maintained, so it WILL be wrong again some day; this is the guard that
+    # makes being wrong cheap.
+    if offset < 0x10000:
+        return f"REFUSING TO FLASH: offset 0x{offset:x} is below the first app partition", ""
 
     flash = sh(f'sudo -n {IDF_PY} -m esptool --chip esp32p4 --port {PORT} -b 921600 '
                f'write_flash 0x{offset:x} {app}/build/{app}.bin')
